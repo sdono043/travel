@@ -186,6 +186,36 @@ label { font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.25
 .recommendation-body a { color: var(--accent); }
 .recommendation-body code { background: #efece5; padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.85em; }
 
+.add-to-itinerary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  margin-left: 0.3rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.itinerary-add-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0.3rem 0;
+}
+
+.itinerary-add-form select,
+.itinerary-add-form input {
+  width: auto;
+  margin-bottom: 0;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.85rem;
+}
+
 .spinner-text { color: var(--muted); font-style: italic; }
 
 /* Tab bar (Booked Trips / Trip Ideas) */

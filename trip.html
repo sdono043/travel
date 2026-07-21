@@ -83,9 +83,15 @@
             <label for="b-end">End date (hotel/car)</label>
             <input id="b-end" type="date" />
           </div>
+        </div>
+        <div style="display:flex; gap:1rem">
           <div style="flex:1">
-            <label for="b-time">Time (optional)</label>
+            <label for="b-time">Start time (optional)</label>
             <input id="b-time" placeholder="e.g. 3:45 PM" />
+          </div>
+          <div style="flex:1">
+            <label for="b-endtime">Checkout/return time (optional)</label>
+            <input id="b-endtime" placeholder="e.g. 11:00 AM" />
           </div>
           <div style="flex:1">
             <label for="b-cost">Cost (USD)</label>
@@ -182,6 +188,15 @@
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
 
+  // Pairs a date with its own time (e.g. "Aug 4, 3:00 PM") rather than
+  // leaving a lone time floating at the end of a date-range summary, which
+  // reads ambiguously once there's both a start and end date.
+  function formatBookingDateTime(dateStr, timeStr) {
+    const date = formatBookingDate(dateStr);
+    if (!date) return "";
+    return timeStr ? `${date}, ${timeStr}` : date;
+  }
+
   async function renderBookings() {
     bookings = await listBookings(tripId);
     const el = document.getElementById("bookings-list");
@@ -199,8 +214,7 @@
             </span>
             <span class="booking-line">
               <span class="muted">
-                ${formatBookingDate(b.startDate)}${b.endDate && b.endDate !== b.startDate ? ` → ${formatBookingDate(b.endDate)}` : ""}
-                ${b.startTime ? ` · ${escapeHtml(b.startTime)}` : ""}
+                ${formatBookingDateTime(b.startDate, b.startTime)}${b.endDate && b.endDate !== b.startDate ? ` → ${formatBookingDateTime(b.endDate, b.endTime)}` : ""}
                 ${b.cost ? ` · $${b.cost}` : ""}
               </span>
               <button class="secondary small delete-booking-btn" data-id="${b.id}" title="Remove">✕</button>
@@ -247,6 +261,7 @@
       startDate: document.getElementById("b-start").value,
       endDate: document.getElementById("b-end").value,
       startTime: document.getElementById("b-time").value.trim(),
+      endTime: document.getElementById("b-endtime").value.trim(),
       cost: parseFloat(document.getElementById("b-cost").value) || null,
       source: "manual",
     });
@@ -333,8 +348,7 @@
             ${!c.likelyMatch ? '<div class="muted">May not match this trip\'s dates/destination</div>' : ""}
           </span>
           <span class="muted">
-            ${formatBookingDate(c.startDate)}${c.endDate && c.endDate !== c.startDate ? ` → ${formatBookingDate(c.endDate)}` : ""}
-            ${c.startTime ? ` · ${escapeHtml(c.startTime)}` : ""}
+            ${formatBookingDateTime(c.startDate, c.startTime)}${c.endDate && c.endDate !== c.startDate ? ` → ${formatBookingDateTime(c.endDate, c.endTime)}` : ""}
             ${c.cost ? `· $${c.cost}` : ""}
           </span>
         </label>`
@@ -368,6 +382,7 @@
           startDate: candidate.startDate,
           endDate: candidate.endDate || "",
           startTime: candidate.startTime || "",
+          endTime: candidate.endTime || "",
           cost: candidate.cost || null,
           location: candidate.location,
           lat,
@@ -471,11 +486,11 @@
   function bookingTooltipHtml(b) {
     const dateLine =
       b.endDate && b.endDate !== b.startDate
-        ? `${formatBookingDate(b.startDate)} → ${formatBookingDate(b.endDate)}`
-        : formatBookingDate(b.startDate);
+        ? `${formatBookingDateTime(b.startDate, b.startTime)} → ${formatBookingDateTime(b.endDate, b.endTime)}`
+        : formatBookingDateTime(b.startDate, b.startTime);
     return `
       <strong>${TYPE_ICON[b.type] || ""} ${escapeHtml(b.details)}</strong><br>
-      <span class="muted">${dateLine}${b.startTime ? ` · ${escapeHtml(b.startTime)}` : ""}${b.cost ? ` · $${b.cost}` : ""}</span>
+      <span class="muted">${dateLine}${b.cost ? ` · $${b.cost}` : ""}</span>
       ${b.confirmationNumber ? `<br><span class="muted">#${escapeHtml(b.confirmationNumber)}</span>` : ""}
       ${b.location ? `<br><span class="muted">${escapeHtml(b.location)}</span>` : ""}
     `;
@@ -652,6 +667,25 @@
     return result;
   }
 
+  // A multi-day hotel/car stay spans every day of the itinerary, but a time
+  // only actually applies at its two edges — check-in on the first day,
+  // check-out on the last. Flights and activities are single-moment events,
+  // so their time (if known) always applies.
+  function dayBookingLine(b, date) {
+    const icon = TYPE_ICON[b.type] || "📌";
+    const isSpan = (b.type === "hotel" || b.type === "car") && b.endDate && b.endDate !== b.startDate;
+    if (isSpan) {
+      if (date === b.endDate) {
+        return `${icon} ${escapeHtml(b.details)} — Check-out${b.endTime ? ` (${escapeHtml(b.endTime)})` : ""}`;
+      }
+      if (date === b.startDate) {
+        return `${icon} ${escapeHtml(b.details)} — Check-in${b.startTime ? ` (${escapeHtml(b.startTime)})` : ""}`;
+      }
+      return `${icon} ${escapeHtml(b.details)}`;
+    }
+    return `${icon} ${escapeHtml(b.details)}${b.startTime ? ` · ${escapeHtml(b.startTime)}` : ""}`;
+  }
+
   async function renderTimeline() {
     itinerary = await listItinerary(tripId);
     const days = dateRange(trip.startDate, trip.endDate);
@@ -668,7 +702,7 @@
           <summary>${formatDay(date)} <span class="muted">${items.length} item(s)</span></summary>
           <div class="day-card-body">
             ${dayBookings
-              .map((b) => `<div class="muted">${TYPE_ICON[b.type] || "📌"} ${escapeHtml(b.details)}</div>`)
+              .map((b) => `<div class="muted">${dayBookingLine(b, date)}</div>`)
               .join("")}
             ${driveTime ? `<div class="muted">🚗 ~${driveTime.minutes} min drive to ${escapeHtml(driveTime.label)} airport (${driveTime.miles} mi)</div>` : ""}
             <div class="day-items">
@@ -680,7 +714,8 @@
                   <span class="day-item-time">${escapeHtml(it.time || "")}</span>
                   <span style="flex:1">
                     <strong>${escapeHtml(it.type)}</strong> — ${escapeHtml(it.title)}
-                    ${it.location ? `<span class="muted"> · ${escapeHtml(it.location)}</span>` : ""}
+                    ${it.durationMinutes ? `<span class="muted"> · ${formatDuration(it.durationMinutes)}</span>` : ""}
+                    ${it.location && it.location.trim().toLowerCase() !== it.title.trim().toLowerCase() ? `<span class="muted"> · ${escapeHtml(it.location)}</span>` : ""}
                   </span>
                   <button class="secondary small delete-item-btn" data-id="${it.id}">Remove</button>
                 </div>`
@@ -868,6 +903,16 @@
     body.querySelectorAll("a").forEach((a) => {
       a.target = "_blank";
       a.rel = "noopener noreferrer";
+      // Every venue name in a recommendation is a link (see the backend
+      // prompt) — a "+" right after it lets the user drop that venue
+      // straight into the day-by-day itinerary without retyping it.
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "add-to-itinerary-btn";
+      addBtn.title = `Add "${a.textContent.trim()}" to itinerary`;
+      addBtn.textContent = "+";
+      addBtn.dataset.title = a.textContent.trim();
+      a.after(addBtn);
     });
 
     details.appendChild(summary);
@@ -875,6 +920,95 @@
     if (prepend) container.prepend(details);
     else container.appendChild(details);
   }
+
+  function formatDuration(minutes) {
+    if (!minutes) return "";
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h && m) return `${h}h ${m}m`;
+    if (h) return `${h}h`;
+    return `${m} min`;
+  }
+
+  // Inline day/time/duration picker inserted right after a recommendation's
+  // "+" button — kept minimal (no modal) since it's a small, single-purpose
+  // action attached to one specific venue name.
+  function openAddToItineraryForm(addBtn) {
+    if (addBtn.nextElementSibling?.classList?.contains("itinerary-add-form")) return;
+    const days = dateRange(trip.startDate, trip.endDate);
+    const form = document.createElement("form");
+    form.className = "itinerary-add-form";
+    form.dataset.title = addBtn.dataset.title;
+    form.innerHTML = `
+      <select class="ia-date">${days.map((d) => `<option value="${d}">${formatDay(d)}</option>`).join("")}</select>
+      <select class="ia-type">
+        <option value="activity">Activity</option>
+        <option value="meal">Meal</option>
+        <option value="other">Other</option>
+      </select>
+      <input type="time" class="ia-time" />
+      <select class="ia-duration">
+        <option value="">Duration</option>
+        <option value="30">30 min</option>
+        <option value="60">1 hr</option>
+        <option value="90">1.5 hr</option>
+        <option value="120">2 hr</option>
+        <option value="180">3 hr</option>
+      </select>
+      <button type="submit" class="small">Add</button>
+      <button type="button" class="secondary small ia-cancel">Cancel</button>
+    `;
+    addBtn.after(form);
+    addBtn.hidden = true;
+  }
+
+  document.getElementById("rec-results").addEventListener("click", (e) => {
+    const addBtn = e.target.closest(".add-to-itinerary-btn");
+    if (addBtn) {
+      openAddToItineraryForm(addBtn);
+      return;
+    }
+    const cancelBtn = e.target.closest(".ia-cancel");
+    if (cancelBtn) {
+      const form = cancelBtn.closest(".itinerary-add-form");
+      const btn = form.previousElementSibling;
+      form.remove();
+      if (btn) btn.hidden = false;
+    }
+  });
+
+  document.getElementById("rec-results").addEventListener("submit", async (e) => {
+    const form = e.target.closest(".itinerary-add-form");
+    if (!form) return;
+    e.preventDefault();
+    const title = form.dataset.title;
+    const date = form.querySelector(".ia-date").value;
+    const type = form.querySelector(".ia-type").value;
+    const time = form.querySelector(".ia-time").value;
+    const durationValue = form.querySelector(".ia-duration").value;
+    const btn = form.previousElementSibling;
+    form.querySelector("button[type=submit]").disabled = true;
+    await addItineraryItem(tripId, {
+      date,
+      time,
+      type,
+      title,
+      location: title,
+      durationMinutes: durationValue ? parseInt(durationValue, 10) : null,
+      notes: "",
+      cost: null,
+      source: "recommendation",
+    });
+    await renderTimeline();
+    renderMap();
+    form.remove();
+    if (btn) {
+      btn.textContent = "✓";
+      btn.title = "Added to itinerary";
+      btn.disabled = true;
+      btn.hidden = false;
+    }
+  });
 
   function escapeHtml(str) {
     const div = document.createElement("div");
