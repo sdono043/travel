@@ -85,8 +85,14 @@ function dedupeBookings(bookings) {
   for (const b of bookings) {
     b.startDate = (b.startDate || "").slice(0, 10);
     b.endDate = (b.endDate || "").slice(0, 10);
+    // A round-trip flight's outbound and return legs share ONE confirmation
+    // number, so confirmation number alone isn't a safe dedupe key for
+    // flights — it would collapse two real, distinct legs into one. Always
+    // include startDate: a true duplicate (same leg from both email and
+    // calendar) has the same date too, so this doesn't weaken dedup of
+    // actual duplicates.
     const key = b.confirmationNumber
-      ? `${b.type}::${b.confirmationNumber.toLowerCase()}`
+      ? `${b.type}::${b.confirmationNumber.toLowerCase()}::${b.startDate}`
       : `${b.type}::${b.startDate}::${b.details.toLowerCase().replace(/\s+/g, " ").trim()}`;
     const existing = byKey.get(key);
     if (!existing || completeness(b) > completeness(existing)) byKey.set(key, b);

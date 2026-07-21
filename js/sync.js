@@ -41,18 +41,35 @@ function decodeBase64Url(data) {
   return atob(data.replace(/-/g, "+").replace(/_/g, "/"));
 }
 
-function extractPlainText(payload) {
-  if (!payload) return "";
-  if (payload.mimeType === "text/plain" && payload.body?.data) {
-    return decodeBase64Url(payload.body.data);
-  }
+function findPart(payload, mimeType) {
+  if (!payload) return null;
+  if (payload.mimeType === mimeType && payload.body?.data) return payload;
   if (payload.parts) {
     for (const part of payload.parts) {
-      const text = extractPlainText(part);
-      if (text) return text;
+      const found = findPart(part, mimeType);
+      if (found) return found;
     }
   }
-  if (payload.body?.data) return decodeBase64Url(payload.body.data);
+  return null;
+}
+
+// Booking confirmations (hotels especially) are almost always sent as
+// HTML-only emails with no text/plain alternative. The old fallback here
+// returned the raw, undecoded HTML — check-in/check-out tables buried under
+// a wall of markup/CSS that got cut off by the length limit before Claude
+// ever saw the actual dates. Parsing it as a DOM and reading textContent
+// gives Claude the same readable text a human sees.
+function htmlToText(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return (doc.body?.textContent || "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function extractPlainText(payload) {
+  const plainPart = findPart(payload, "text/plain");
+  if (plainPart) return decodeBase64Url(plainPart.body.data);
+  const htmlPart = findPart(payload, "text/html");
+  if (htmlPart) return htmlToText(decodeBase64Url(htmlPart.body.data));
+  if (payload?.body?.data) return decodeBase64Url(payload.body.data);
   return "";
 }
 
@@ -64,7 +81,7 @@ async function fetchRecentTravelEmails(token, maxResults = 25) {
     const msg = await gmailApi(`messages/${id}?format=full`, token);
     const subjectHeader = msg.payload.headers.find((h) => h.name === "Subject");
     const fromHeader = msg.payload.headers.find((h) => h.name === "From");
-    const body = extractPlainText(msg.payload).slice(0, 4000);
+    const body = extractPlainText(msg.payload).slice(0, 8000);
     snippets.push({
       subject: subjectHeader?.value || "",
       from: fromHeader?.value || "",

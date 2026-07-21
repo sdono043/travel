@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%8F%96%EF%B8%8F</text></svg>" />
 <title>Family Travel — Trip</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="styles.css" />
@@ -291,10 +292,17 @@
   // A candidate is a near-duplicate of something already saved for this trip
   // if it shares a non-empty confirmation number, or otherwise matches on
   // type + date + details text.
+  // A round-trip flight's outbound and return legs share ONE confirmation
+  // number, so matching on confirmation number alone would make the return
+  // leg look like a duplicate of the already-saved outbound leg and hide it
+  // from review — always require the date to match too.
   function alreadyBooked(candidate) {
     return bookings.some((b) => {
       if (candidate.confirmationNumber && b.confirmationNumber) {
-        return b.confirmationNumber.toLowerCase() === candidate.confirmationNumber.toLowerCase();
+        return (
+          b.confirmationNumber.toLowerCase() === candidate.confirmationNumber.toLowerCase() &&
+          b.startDate === candidate.startDate
+        );
       }
       return (
         b.type === candidate.type &&
