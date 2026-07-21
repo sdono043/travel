@@ -25,11 +25,14 @@ module.exports = async (req, res) => {
 
     const hasSpecificAsk = !!(interests && interests.trim());
 
+    // Sonnet 5 at medium effort with a smaller search budget — this is a
+    // search-and-summarize task, not deep reasoning, so Opus-at-high-effort
+    // was overkill for the cost (roughly 40-60% pricier per request).
     const response = await client.messages.create({
-      model: "claude-opus-4-8",
+      model: "claude-sonnet-5",
       max_tokens: 4096,
-      output_config: { effort: "high" },
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
+      output_config: { effort: "medium" },
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }],
       messages: [
         {
           role: "user",
