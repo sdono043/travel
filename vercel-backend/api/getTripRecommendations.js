@@ -50,7 +50,12 @@ module.exports = async (req, res) => {
                 "booking category listed as already booked above, and focus research on what's still open " +
                 "(e.g. skip flights/hotels if already booked, and cover activities/dining instead). Search for " +
                 "current, specific, real options with rough current price ranges (USD), and note that prices are " +
-                "estimates to verify before booking."),
+                "estimates to verify before booking.") +
+            "\n\nFormat the response in markdown. For every specific venue/place you recommend (restaurant, " +
+            "hotel, activity, etc.), make its name a markdown link: link directly to its official website if " +
+            "your search turned one up, otherwise link it to a Google Maps search URL of the form " +
+            "https://www.google.com/maps/search/?api=1&query=URL-ENCODED-NAME-AND-LOCATION (URL-encode spaces as " +
+            "%20, etc.). Never leave a specific place name unlinked.",
         },
       ],
     });

@@ -126,6 +126,7 @@
 </main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/marked@12/marked.min.js"></script>
 <script type="module">
   import { requireAuth, signOut } from "./js/auth.js";
   import { getTrip, listBookings, addBooking, deleteBooking, listRecommendations, setTripStatus, updateBookingLocation } from "./js/trips.js";
@@ -759,7 +760,7 @@
           location: b.location,
         })),
       });
-      renderRecommendation(result.text);
+      renderRecommendation(result.text, new Date(), { prepend: true, open: true });
     } catch (err) {
       errorEl.textContent = err.message;
       errorEl.hidden = false;
@@ -770,16 +771,45 @@
 
   async function renderPastRecommendations() {
     const recs = await listRecommendations(tripId);
-    recs.forEach((r) => renderRecommendation(r.text, false));
+    // Newest-first from Firestore; appended in that order with open:false so
+    // the page loads as a stack of collapsed summaries, not a wall of text.
+    recs.forEach((r) => renderRecommendation(r.text, r.createdAt, { prepend: false, open: false }));
   }
 
-  function renderRecommendation(text, prepend = true) {
+  // First non-empty line, markdown symbols stripped, used as the collapsed
+  // <summary> label so a stack of past recommendations reads as a list of
+  // topics rather than a wall of text.
+  function recommendationSummary(text) {
+    const firstLine = (text || "").split("\n").find((l) => l.trim().length > 0) || "Recommendation";
+    return firstLine.replace(/^#+\s*/, "").replace(/[*_`[\]]/g, "").trim().slice(0, 100);
+  }
+
+  function renderRecommendation(text, createdAt, { prepend = true, open = prepend } = {}) {
     const container = document.getElementById("rec-results");
-    const block = document.createElement("div");
-    block.className = "recommendation-block";
-    block.textContent = text;
-    if (prepend) container.prepend(block);
-    else container.appendChild(block);
+    const dateObj = createdAt && typeof createdAt.toDate === "function" ? createdAt.toDate() : createdAt;
+    const dateLabel = dateObj
+      ? dateObj.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+      : "";
+
+    const details = document.createElement("details");
+    details.className = "recommendation-block";
+    details.open = open;
+
+    const summary = document.createElement("summary");
+    summary.innerHTML = `<span>${escapeHtml(recommendationSummary(text))}</span>${dateLabel ? `<span class="muted">${escapeHtml(dateLabel)}</span>` : ""}`;
+
+    const body = document.createElement("div");
+    body.className = "recommendation-body";
+    body.innerHTML = window.marked ? marked.parse(text || "") : escapeHtml(text || "");
+    body.querySelectorAll("a").forEach((a) => {
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+    });
+
+    details.appendChild(summary);
+    details.appendChild(body);
+    if (prepend) container.prepend(details);
+    else container.appendChild(details);
   }
 
   function escapeHtml(str) {

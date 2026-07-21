@@ -9,10 +9,21 @@ import { API_BASE_URL } from "./firebase-config.js";
 const GMAIL_QUERY =
   'newer_than:180d (confirmation OR confirmed OR itinerary OR reservation OR "booking confirmed" OR flight OR hotel OR "rental car" OR "car rental" OR "e-ticket")';
 
+// Thrown when Google rejects the cached access token (expired — they're only
+// good for about an hour) so the caller knows to clear it and re-auth, rather
+// than surfacing a raw "401" to the user.
+class GoogleAuthError extends Error {
+  constructor(message) {
+    super(message);
+    this.isAuthError = true;
+  }
+}
+
 async function gmailApi(path, token) {
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (res.status === 401) throw new GoogleAuthError(`Gmail API error: ${res.status}`);
   if (!res.ok) throw new Error(`Gmail API error: ${res.status}`);
   return res.json();
 }
@@ -21,6 +32,7 @@ async function calendarApi(path, token) {
   const res = await fetch(`https://www.googleapis.com/calendar/v3/${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (res.status === 401) throw new GoogleAuthError(`Calendar API error: ${res.status}`);
   if (!res.ok) throw new Error(`Calendar API error: ${res.status}`);
   return res.json();
 }
@@ -87,10 +99,21 @@ export async function syncFromGoogle(tripId, { destination, startDate, endDate }
   }
   if (!token) throw new Error("Google sign-in did not return an access token.");
 
-  const [emails, events] = await Promise.all([
-    fetchRecentTravelEmails(token),
-    fetchUpcomingCalendarEvents(token),
-  ]);
+  let emails, events;
+  try {
+    [emails, events] = await Promise.all([fetchRecentTravelEmails(token), fetchUpcomingCalendarEvents(token)]);
+  } catch (err) {
+    // The cached access token is only good for about an hour. If Google
+    // rejects it, the old code would keep reusing the same dead token forever
+    // (getGoogleAccessToken only re-prompts when nothing is cached at all) —
+    // clear it and prompt for a fresh one instead of surfacing a raw 401.
+    if (!err.isAuthError) throw err;
+    sessionStorage.removeItem("googleAccessToken");
+    await signInWithGoogle({ requestGmailAndCalendar: true });
+    token = getGoogleAccessToken();
+    if (!token) throw new Error("Google sign-in did not return an access token.");
+    [emails, events] = await Promise.all([fetchRecentTravelEmails(token), fetchUpcomingCalendarEvents(token)]);
+  }
 
   const idToken = await getIdToken();
   const res = await fetch(`${API_BASE_URL}/api/syncGmailBookings`, {

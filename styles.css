@@ -157,13 +157,34 @@ label { font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.25
 }
 
 .recommendation-block {
-  white-space: pre-wrap;
   background: #fbfaf8;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 1rem;
+  padding: 0.85rem 1rem;
   margin-top: 0.75rem;
 }
+
+.recommendation-block summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.recommendation-block summary::-webkit-details-marker { display: none; }
+.recommendation-block summary span.muted { font-weight: 400; flex-shrink: 0; }
+
+.recommendation-block[open] summary { margin-bottom: 0.75rem; }
+
+.recommendation-body { line-height: 1.55; }
+.recommendation-body h1, .recommendation-body h2, .recommendation-body h3 { margin: 1rem 0 0.4rem; }
+.recommendation-body h1:first-child, .recommendation-body h2:first-child, .recommendation-body h3:first-child { margin-top: 0; }
+.recommendation-body p { margin: 0.5rem 0; }
+.recommendation-body ul, .recommendation-body ol { margin: 0.4rem 0; padding-left: 1.4rem; }
+.recommendation-body a { color: var(--accent); }
+.recommendation-body code { background: #efece5; padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.85em; }
 
 .spinner-text { color: var(--muted); font-style: italic; }
 
