@@ -66,6 +66,10 @@ export async function deleteBooking(tripId, bookingId) {
   await deleteDoc(doc(db, "trips", tripId, "bookings", bookingId));
 }
 
+export async function updateBookingLocation(tripId, bookingId, { lat, lng }) {
+  await updateDoc(doc(db, "trips", tripId, "bookings", bookingId), { lat, lng });
+}
+
 export async function listRecommendations(tripId) {
   const q = query(collection(db, "trips", tripId, "recommendations"), orderBy("createdAt", "desc"));
   const snap = await getDocs(q);

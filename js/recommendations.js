@@ -14,8 +14,11 @@ async function callApi(path, body) {
 }
 
 // Called from trip.html "Get recommendations" panel (destination-level research).
-export async function getRecommendations(tripId, { destination, startDate, endDate, interests }) {
-  return callApi("/api/getTripRecommendations", { tripId, destination, startDate, endDate, interests });
+// `bookings` (already-saved flights/hotels/cars/activities) is passed along so
+// the backend can answer in context — e.g. suggest dinner spots near an
+// already-booked hotel instead of re-researching flights nobody asked about.
+export async function getRecommendations(tripId, { destination, startDate, endDate, interests, bookings }) {
+  return callApi("/api/getTripRecommendations", { tripId, destination, startDate, endDate, interests, bookings });
   // { text: string }
 }
 

@@ -258,3 +258,72 @@ label { font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.25
 .suggestion-card button { flex-shrink: 0; }
 
 button.small { padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+
+/* Horizontal trip timeline */
+.timeline-wrap {
+  position: relative;
+  padding-top: 1.75rem;
+  padding-bottom: 0.5rem;
+  overflow-x: auto;
+}
+
+.timeline-track {
+  position: relative;
+  min-width: 100%;
+  min-height: 3rem;
+  background: #fbfaf8;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.timeline-day-tick {
+  position: absolute;
+  top: -1.4rem;
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.timeline-bar {
+  position: absolute;
+  background: var(--accent);
+  border-radius: 6px;
+  opacity: 0.9;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.5rem;
+  color: #fff;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: default;
+}
+
+.timeline-bar.type-car { background: #6b7280; }
+
+.timeline-icon-marker {
+  position: absolute;
+  top: 0.2rem;
+  transform: translateX(-50%);
+  font-size: 1.3rem;
+  cursor: default;
+  line-height: 1;
+}
+
+.timeline-tooltip {
+  position: fixed;
+  background: var(--ink);
+  color: #fff;
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  max-width: 260px;
+  z-index: 1000;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  line-height: 1.4;
+}
+
+.timeline-tooltip .muted { color: #cfcac0; }

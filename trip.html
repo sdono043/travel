@@ -79,6 +79,10 @@
             <input id="b-start" type="date" />
           </div>
           <div style="flex:1">
+            <label for="b-end">End date (hotel/car)</label>
+            <input id="b-end" type="date" />
+          </div>
+          <div style="flex:1">
             <label for="b-cost">Cost (USD)</label>
             <input id="b-cost" type="number" step="0.01" placeholder="optional" />
           </div>
@@ -87,6 +91,14 @@
         <button type="submit">Add booking</button>
       </form>
     </details>
+  </div>
+
+  <div class="card">
+    <h3>Trip Timeline</h3>
+    <p class="muted">Flights and stays at a glance — hover for details.</p>
+    <div class="timeline-wrap">
+      <div class="timeline-track" id="timeline-track"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -112,7 +124,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
   import { requireAuth, signOut } from "./js/auth.js";
-  import { getTrip, listBookings, addBooking, deleteBooking, listRecommendations, setTripStatus } from "./js/trips.js";
+  import { getTrip, listBookings, addBooking, deleteBooking, listRecommendations, setTripStatus, updateBookingLocation } from "./js/trips.js";
   import { listItinerary, addItineraryItem, deleteItineraryItem } from "./js/itinerary.js";
   import { geocodeLocation } from "./js/geocode.js";
   import { syncFromGoogle } from "./js/sync.js";
@@ -179,7 +191,10 @@
               ${b.confirmationNumber ? `<span class="muted">#${escapeHtml(b.confirmationNumber)}</span>` : ""}
             </span>
             <span class="booking-line">
-              <span class="muted">${formatBookingDate(b.startDate)}${b.cost ? ` · $${b.cost}` : ""}</span>
+              <span class="muted">
+                ${formatBookingDate(b.startDate)}${b.endDate && b.endDate !== b.startDate ? ` → ${formatBookingDate(b.endDate)}` : ""}
+                ${b.cost ? ` · $${b.cost}` : ""}
+              </span>
               <button class="secondary small delete-booking-btn" data-id="${b.id}" title="Remove">✕</button>
             </span>
           </div>`
@@ -187,6 +202,7 @@
         .join("");
     }
     renderMap();
+    renderTimelineChart();
   }
 
   document.getElementById("bookings-list").addEventListener("click", async (e) => {
@@ -221,11 +237,13 @@
       lng,
       confirmationNumber: document.getElementById("b-confirmation").value.trim(),
       startDate: document.getElementById("b-start").value,
+      endDate: document.getElementById("b-end").value,
       cost: parseFloat(document.getElementById("b-cost").value) || null,
       source: "manual",
     });
     e.target.reset();
     await renderBookings();
+    await renderTimeline();
   });
 
   document.getElementById("sync-btn").addEventListener("click", async () => {
@@ -298,7 +316,10 @@
             ${c.confirmationNumber ? `<div class="muted">Conf# ${escapeHtml(c.confirmationNumber)}</div>` : ""}
             ${!c.likelyMatch ? '<div class="muted">May not match this trip\'s dates/destination</div>' : ""}
           </span>
-          <span class="muted">${formatBookingDate(c.startDate)} ${c.cost ? `· $${c.cost}` : ""}</span>
+          <span class="muted">
+            ${formatBookingDate(c.startDate)}${c.endDate && c.endDate !== c.startDate ? ` → ${formatBookingDate(c.endDate)}` : ""}
+            ${c.cost ? `· $${c.cost}` : ""}
+          </span>
         </label>`
       )
       .join("");
@@ -328,6 +349,7 @@
           details: candidate.details,
           confirmationNumber: candidate.confirmationNumber,
           startDate: candidate.startDate,
+          endDate: candidate.endDate || "",
           cost: candidate.cost || null,
           location: candidate.location,
           lat,
@@ -360,6 +382,28 @@
 
   // ---------- Map ----------
 
+  // Bookings we've already tried to backfill a pin for this session, so a
+  // failed/empty geocode doesn't retry on every render.
+  const geocodeAttempted = new Set();
+
+  // Older bookings (saved before location/lat/lng were both captured
+  // correctly) may have a location string but no coordinates. Backfill them
+  // once, in the background, then re-render so their pin appears without
+  // requiring the user to delete and re-add the booking.
+  function backfillMissingPins() {
+    bookings
+      .filter((b) => b.location && (!b.lat || !b.lng) && b.type !== "flight" && !geocodeAttempted.has(b.id))
+      .forEach(async (b) => {
+        geocodeAttempted.add(b.id);
+        const geo = await geocodeLocation(b.location);
+        if (!geo) return;
+        b.lat = geo.lat;
+        b.lng = geo.lng;
+        await updateBookingLocation(tripId, b.id, geo);
+        renderMap();
+      });
+  }
+
   function renderMap() {
     if (!window.L) return;
     if (!map) {
@@ -381,6 +425,8 @@
       ...itinerary.filter((i) => i.lat && i.lng).map((i) => ({ lat: i.lat, lng: i.lng, label: i.title })),
     ];
 
+    backfillMissingPins();
+
     if (!points.length) {
       map.setView([20, 0], 2);
       return;
@@ -390,6 +436,130 @@
     });
     map.fitBounds(points.map((p) => [p.lat, p.lng]), { padding: [30, 30], maxZoom: 14 });
   }
+
+  // ---------- Trip timeline (horizontal chart) ----------
+
+  let timelineTooltipEl = null;
+  function ensureTimelineTooltip() {
+    if (!timelineTooltipEl) {
+      timelineTooltipEl = document.createElement("div");
+      timelineTooltipEl.className = "timeline-tooltip";
+      timelineTooltipEl.hidden = true;
+      document.body.appendChild(timelineTooltipEl);
+    }
+    return timelineTooltipEl;
+  }
+
+  function bookingTooltipHtml(b) {
+    const dateLine =
+      b.endDate && b.endDate !== b.startDate
+        ? `${formatBookingDate(b.startDate)} → ${formatBookingDate(b.endDate)}`
+        : formatBookingDate(b.startDate);
+    return `
+      <strong>${TYPE_ICON[b.type] || ""} ${escapeHtml(b.details)}</strong><br>
+      <span class="muted">${dateLine}${b.cost ? ` · $${b.cost}` : ""}</span>
+      ${b.confirmationNumber ? `<br><span class="muted">#${escapeHtml(b.confirmationNumber)}</span>` : ""}
+      ${b.location ? `<br><span class="muted">${escapeHtml(b.location)}</span>` : ""}
+    `;
+  }
+
+  // Bookings outside the trip's own date range (dayIndex === -1) are skipped
+  // here — this chart is a per-trip view, not a catch-all for every booking
+  // ever synced.
+  // Layout constants (rem) for the timeline track — kept in sync with the
+  // inline styles below so track height always fits however many lanes of
+  // overlapping hotel/car bars this trip needs (e.g. a hotel stay + a rental
+  // car covering the same days must not render on top of each other).
+  const TIMELINE_ICON_ROW_HEIGHT = 1.8;
+  const TIMELINE_LANE_HEIGHT = 2.2;
+  const TIMELINE_LANE_GAP = 0.4;
+
+  function renderTimelineChart() {
+    const track = document.getElementById("timeline-track");
+    if (!trip) return;
+    const days = dateRange(trip.startDate, trip.endDate);
+    const totalDays = days.length;
+    if (!totalDays) {
+      track.innerHTML = "";
+      return;
+    }
+    const dayWidth = 100 / totalDays;
+    const dayIndex = (dateStr) => days.indexOf((dateStr || "").slice(0, 10));
+
+    let html = days
+      .map((d, i) => {
+        const label = new Date(d + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        return `<div class="timeline-day-tick" style="left:${(i + 0.5) * dayWidth}%">${label}</div>`;
+      })
+      .join("");
+
+    const icons = [];
+    const spans = [];
+    bookings.forEach((b) => {
+      const startIdx = dayIndex(b.startDate);
+      if (startIdx === -1) return;
+      if (b.type === "hotel" || b.type === "car") {
+        const rawEndIdx = b.endDate ? dayIndex(b.endDate) : startIdx;
+        const endIdx = rawEndIdx === -1 ? totalDays - 1 : Math.max(rawEndIdx, startIdx);
+        spans.push({ b, startIdx, endIdx });
+      } else {
+        icons.push({ b, startIdx });
+      }
+    });
+
+    // Pack overlapping spans (e.g. a hotel stay and a rental car covering the
+    // same days) into separate lanes so they stack instead of covering each
+    // other — greedy interval scheduling, sorted by start day.
+    spans.sort((a, b) => a.startIdx - b.startIdx);
+    const laneEnds = [];
+    spans.forEach((s) => {
+      let lane = laneEnds.findIndex((end) => s.startIdx > end);
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(s.endIdx);
+      } else {
+        laneEnds[lane] = s.endIdx;
+      }
+      s.lane = lane;
+    });
+
+    icons.forEach(({ b, startIdx }) => {
+      const left = (startIdx + 0.5) * dayWidth;
+      html += `<div class="timeline-icon-marker" data-booking-id="${b.id}" style="left:${left}%; top:0.2rem">${TYPE_ICON[b.type] || "📌"}</div>`;
+    });
+    spans.forEach(({ b, startIdx, endIdx, lane }) => {
+      const left = startIdx * dayWidth;
+      const width = (endIdx - startIdx + 1) * dayWidth;
+      const top = TIMELINE_ICON_ROW_HEIGHT + lane * (TIMELINE_LANE_HEIGHT + TIMELINE_LANE_GAP);
+      html += `
+        <div class="timeline-bar${b.type === "car" ? " type-car" : ""}" data-booking-id="${b.id}" style="left:${left}%; width:${width}%; top:${top}rem; height:${TIMELINE_LANE_HEIGHT}rem">
+          <span>${TYPE_ICON[b.type]}</span><span>${escapeHtml(b.details)}</span>
+        </div>`;
+    });
+
+    const laneCount = Math.max(1, laneEnds.length);
+    track.style.height = `${TIMELINE_ICON_ROW_HEIGHT + laneCount * (TIMELINE_LANE_HEIGHT + TIMELINE_LANE_GAP) + 0.2}rem`;
+    track.innerHTML = html;
+  }
+
+  const timelineTrackEl = document.getElementById("timeline-track");
+  timelineTrackEl.addEventListener("mouseover", (e) => {
+    const el = e.target.closest("[data-booking-id]");
+    if (!el) return;
+    const b = bookings.find((x) => x.id === el.dataset.bookingId);
+    if (!b) return;
+    const tip = ensureTimelineTooltip();
+    tip.innerHTML = bookingTooltipHtml(b);
+    tip.hidden = false;
+  });
+  timelineTrackEl.addEventListener("mousemove", (e) => {
+    if (!timelineTooltipEl || timelineTooltipEl.hidden) return;
+    timelineTooltipEl.style.left = e.clientX + 14 + "px";
+    timelineTooltipEl.style.top = e.clientY + 14 + "px";
+  });
+  timelineTrackEl.addEventListener("mouseout", (e) => {
+    if (e.target.closest("[data-booking-id]") && timelineTooltipEl) timelineTooltipEl.hidden = true;
+  });
 
   // ---------- Day-by-day timeline ----------
 
@@ -419,7 +589,8 @@
     container.innerHTML = days
       .map((date, i) => {
         const items = itinerary.filter((it) => it.date === date).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-        const dayBookings = bookings.filter((b) => b.startDate === date);
+        // Spans the whole stay for hotels/cars with an end date, not just the check-in day.
+        const dayBookings = bookings.filter((b) => date >= b.startDate && date <= (b.endDate || b.startDate));
         return `
         <details class="day-card" data-date="${date}" ${i === 0 ? "open" : ""}>
           <summary>${formatDay(date)} <span class="muted">${items.length} item(s)</span></summary>
@@ -572,6 +743,13 @@
         startDate: trip.startDate,
         endDate: trip.endDate,
         interests: document.getElementById("r-interests").value.trim(),
+        bookings: bookings.map((b) => ({
+          type: b.type,
+          details: b.details,
+          startDate: b.startDate,
+          endDate: b.endDate,
+          location: b.location,
+        })),
       });
       renderRecommendation(result.text);
     } catch (err) {

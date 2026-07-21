@@ -23,7 +23,15 @@ const BOOKING_SCHEMA = {
             type: "string",
             description:
               "Plain calendar date ONLY, format YYYY-MM-DD — no time, no timezone offset. For flights, the " +
-              "departure date. For hotels, the check-in date.",
+              "departure date. For hotels, the check-in/arrival date. For rental cars, the pickup date.",
+          },
+          endDate: {
+            type: "string",
+            description:
+              "Plain calendar date ONLY, format YYYY-MM-DD. For hotels, the check-out/departure date. For rental " +
+              "cars, the return/drop-off date. Empty string for flights and activities (single-day events) or if " +
+              "no end date is present in the source text. Look for labels like 'Arrival - Departure', 'Check-in / " +
+              "Check-out', 'Nights', or similar date ranges in hotel and car confirmations.",
           },
           cost: { type: "number" },
           location: {
@@ -39,7 +47,7 @@ const BOOKING_SCHEMA = {
               "it looks like a different trip (e.g. unrelated dates or a different city).",
           },
         },
-        required: ["type", "details", "confirmationNumber", "startDate", "cost", "location", "likelyMatch"],
+        required: ["type", "details", "confirmationNumber", "startDate", "endDate", "cost", "location", "likelyMatch"],
         additionalProperties: false,
       },
     },
@@ -58,6 +66,7 @@ function dedupeBookings(bookings) {
   const byKey = new Map();
   for (const b of bookings) {
     b.startDate = (b.startDate || "").slice(0, 10);
+    b.endDate = (b.endDate || "").slice(0, 10);
     const key = b.confirmationNumber
       ? `${b.type}::${b.confirmationNumber.toLowerCase()}`
       : `${b.type}::${b.startDate}::${b.details.toLowerCase().replace(/\s+/g, " ").trim()}`;
@@ -107,8 +116,11 @@ module.exports = async (req, res) => {
             "confirmation number, or same route+date) and output only ONE booking for it, combining whatever " +
             "details are available across both — do not emit duplicates.\n\n" +
             "If a field isn't present in the source text, use an empty string for text fields or 0 for cost. " +
-            "Follow each field's format description exactly (especially: startDate is YYYY-MM-DD only, and " +
-            "location is a separate field from details — never merge an address into details).\n\n" +
+            "Follow each field's format description exactly (especially: startDate/endDate are YYYY-MM-DD only, " +
+            "and location is a separate field from details — never merge an address into details). For hotels " +
+            "and rental cars, look carefully for a check-in/check-out or pickup/return date range (often in a " +
+            "table like 'Arrival - Departure') and fill in BOTH startDate and endDate — do not leave endDate " +
+            "empty just because it takes more effort to find.\n\n" +
             `The trip currently being planned is: destination "${destination || "unknown"}", dates ${startDate || "?"} ` +
             `to ${endDate || "?"}. For each booking you find, set likelyMatch to true only if its dates/destination ` +
             "plausibly belong to this specific trip — set it to false for anything that looks like a different trip " +
