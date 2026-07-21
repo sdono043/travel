@@ -41,6 +41,14 @@
     <p id="sync-error" class="error" hidden></p>
     <p id="sync-status" class="spinner-text" hidden></p>
     <button id="sync-btn" class="secondary">Sync from Gmail/Calendar</button>
+
+    <div id="sync-review" hidden style="margin-top:1rem">
+      <p class="muted">Found these in your inbox/calendar. Check the ones that belong to this trip, then add them.</p>
+      <div id="sync-candidates"></div>
+      <button type="button" id="add-selected-btn" class="small" style="margin-top:0.5rem">Add selected</button>
+      <button type="button" id="dismiss-sync-btn" class="secondary small" style="margin-top:0.5rem">Dismiss</button>
+    </div>
+
     <div id="bookings-list" style="margin-top:1rem">
       <p class="muted">Loading…</p>
     </div>
@@ -117,6 +125,7 @@
   let trip = null;
   let bookings = [];
   let itinerary = [];
+  let syncCandidates = []; // pending review from the last Gmail/Calendar sync
   const daySuggestions = {}; // date -> [{time,type,title,location,notes,cost}]
   let map = null;
   const mapMarkers = [];
@@ -172,10 +181,14 @@
 
   document.getElementById("booking-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const type = document.getElementById("b-type").value;
     const location = document.getElementById("b-location").value.trim();
+    // A flight has a departure AND arrival airport, so a single map pin for
+    // it is misleading (and free-text geocoding of airport codes/cities is
+    // unreliable) — only geocode single-location bookings.
     let lat = null;
     let lng = null;
-    if (location) {
+    if (location && type !== "flight") {
       const geo = await geocodeLocation(location);
       if (geo) {
         lat = geo.lat;
@@ -183,7 +196,7 @@
       }
     }
     await addBooking(tripId, {
-      type: document.getElementById("b-type").value,
+      type,
       details: document.getElementById("b-details").value.trim(),
       location,
       lat,
@@ -205,10 +218,18 @@
     statusEl.textContent = "Connecting to Google and scanning recent emails/events…";
     document.getElementById("sync-btn").disabled = true;
     try {
-      const result = await syncFromGoogle(tripId);
-      statusEl.textContent = `Added ${result.added} booking(s) from sync.`;
-      await renderTrip();
-      await renderBookings();
+      const result = await syncFromGoogle(tripId, {
+        destination: trip.destination,
+        startDate: trip.startDate,
+        endDate: trip.endDate,
+      });
+      syncCandidates = result.candidates;
+      if (!syncCandidates.length) {
+        statusEl.textContent = "No travel bookings found in recent email/calendar.";
+      } else {
+        statusEl.textContent = `Found ${syncCandidates.length} possible booking(s) — review below.`;
+        renderSyncCandidates();
+      }
     } catch (err) {
       errorEl.textContent = err.message;
       errorEl.hidden = false;
@@ -216,6 +237,84 @@
     } finally {
       document.getElementById("sync-btn").disabled = false;
     }
+  });
+
+  function renderSyncCandidates() {
+    const container = document.getElementById("sync-candidates");
+    const reviewEl = document.getElementById("sync-review");
+    if (!syncCandidates.length) {
+      reviewEl.hidden = true;
+      return;
+    }
+    reviewEl.hidden = false;
+    container.innerHTML = syncCandidates
+      .map(
+        (c, i) => `
+        <label class="booking-row" style="cursor:pointer; align-items:flex-start; gap:0.75rem">
+          <input type="checkbox" class="sync-candidate-check" data-index="${i}" ${c.likelyMatch ? "checked" : ""} style="width:auto; margin-top:0.2rem" />
+          <span style="flex:1">
+            <strong>${escapeHtml(c.type)}</strong> — ${escapeHtml(c.details)}
+            ${c.confirmationNumber ? `<div class="muted">Conf# ${escapeHtml(c.confirmationNumber)}</div>` : ""}
+            ${!c.likelyMatch ? '<div class="muted">May not match this trip\'s dates/destination</div>' : ""}
+          </span>
+          <span class="muted">${c.startDate || ""} ${c.cost ? `· $${c.cost}` : ""}</span>
+        </label>`
+      )
+      .join("");
+  }
+
+  document.getElementById("add-selected-btn").addEventListener("click", async (e) => {
+    const checked = Array.from(document.querySelectorAll(".sync-candidate-check:checked"));
+    if (!checked.length) return;
+    e.target.disabled = true;
+    try {
+      let addedFlightOrHotel = false;
+      for (const box of checked) {
+        const candidate = syncCandidates[parseInt(box.dataset.index, 10)];
+        // Skip geocoding for flights — see the note in the manual booking
+        // form handler above.
+        let lat = null;
+        let lng = null;
+        if (candidate.location && candidate.type !== "flight") {
+          const geo = await geocodeLocation(candidate.location);
+          if (geo) {
+            lat = geo.lat;
+            lng = geo.lng;
+          }
+        }
+        await addBooking(tripId, {
+          type: candidate.type,
+          details: candidate.details,
+          confirmationNumber: candidate.confirmationNumber,
+          startDate: candidate.startDate,
+          cost: candidate.cost || null,
+          location: candidate.location,
+          lat,
+          lng,
+          source: "gmail_sync",
+        });
+        if (candidate.type === "flight" || candidate.type === "hotel") addedFlightOrHotel = true;
+      }
+
+      // A real flight/hotel confirmation means the trip is no longer just an idea.
+      if (addedFlightOrHotel && trip.status === "idea") {
+        await setTripStatus(tripId, "booked");
+      }
+
+      syncCandidates = [];
+      document.getElementById("sync-review").hidden = true;
+      document.getElementById("sync-status").hidden = true;
+      await renderTrip();
+      await renderBookings();
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+
+  document.getElementById("dismiss-sync-btn").addEventListener("click", () => {
+    syncCandidates = [];
+    document.getElementById("sync-review").hidden = true;
+    document.getElementById("sync-status").hidden = true;
   });
 
   // ---------- Map ----------
@@ -232,8 +331,12 @@
     mapMarkers.forEach((m) => map.removeLayer(m));
     mapMarkers.length = 0;
 
+    // Flights are excluded even if an old record has a stray lat/lng saved
+    // from before this was fixed — a flight has two airports, not one point.
     const points = [
-      ...bookings.filter((b) => b.lat && b.lng).map((b) => ({ lat: b.lat, lng: b.lng, label: b.details })),
+      ...bookings
+        .filter((b) => b.lat && b.lng && b.type !== "flight")
+        .map((b) => ({ lat: b.lat, lng: b.lng, label: b.details })),
       ...itinerary.filter((i) => i.lat && i.lng).map((i) => ({ lat: i.lat, lng: i.lng, label: i.title })),
     ];
 

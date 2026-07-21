@@ -1,10 +1,13 @@
 import { getGoogleAccessToken, signInWithGoogle, getIdToken } from "./auth.js";
-import { geocodeLocation } from "./geocode.js";
-import { updateBookingLocation } from "./trips.js";
 import { API_BASE_URL } from "./firebase-config.js";
 
+// No category: restriction — Gmail auto-sorts most hotel/flight confirmation
+// emails into "Updates" or "Promotions", not "Primary", so filtering to
+// Primary silently misses them. Keeping this broad (not subject-only) means
+// more false positives reach Claude, but that's cheap — a missed booking
+// email can never be recovered, so recall matters more than precision here.
 const GMAIL_QUERY =
-  'category:primary newer_than:180d (subject:(confirmation OR itinerary OR "booking confirmed" OR reservation) (flight OR hotel OR "rental car" OR itinerary OR trip))';
+  'newer_than:180d (confirmation OR confirmed OR itinerary OR reservation OR "booking confirmed" OR flight OR hotel OR "rental car" OR "car rental" OR "e-ticket")';
 
 async function gmailApi(path, token) {
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, {
@@ -41,7 +44,7 @@ function extractPlainText(payload) {
   return "";
 }
 
-async function fetchRecentTravelEmails(token, maxResults = 15) {
+async function fetchRecentTravelEmails(token, maxResults = 25) {
   const list = await gmailApi(`messages?q=${encodeURIComponent(GMAIL_QUERY)}&maxResults=${maxResults}`, token);
   const ids = (list.messages || []).map((m) => m.id);
   const snippets = [];
@@ -73,8 +76,10 @@ async function fetchUpcomingCalendarEvents(token) {
   }));
 }
 
-// Called from trip.html "Sync from Gmail/Calendar" button.
-export async function syncFromGoogle(tripId) {
+// Called from trip.html "Sync from Gmail/Calendar" button. Returns candidate
+// bookings for review — nothing is saved yet. The caller shows a pick list
+// and only writes the ones the user selects (see addSyncCandidate in trip.html).
+export async function syncFromGoogle(tripId, { destination, startDate, endDate } = {}) {
   let token = getGoogleAccessToken();
   if (!token) {
     await signInWithGoogle({ requestGmailAndCalendar: true });
@@ -91,23 +96,9 @@ export async function syncFromGoogle(tripId) {
   const res = await fetch(`${API_BASE_URL}/api/syncGmailBookings`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ tripId, items: [...emails, ...events] }),
+    body: JSON.stringify({ tripId, items: [...emails, ...events], destination, startDate, endDate }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `Sync failed (${res.status})`);
-
-  // Best-effort: geocode each new booking's location so it can show up as a
-  // map pin. Failures here shouldn't block the sync from being reported as
-  // successful.
-  for (const booking of data.bookings) {
-    if (!booking.location) continue;
-    try {
-      const geo = await geocodeLocation(booking.location);
-      if (geo) await updateBookingLocation(tripId, booking.id, geo.lat, geo.lng);
-    } catch {
-      // ignore — the booking still saved, just without a map pin
-    }
-  }
-
-  return data; // { added: number, bookings: [...] }
+  return data; // { candidates: [{ type, details, confirmationNumber, startDate, cost, location, likelyMatch }] }
 }
