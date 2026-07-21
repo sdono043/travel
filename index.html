@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Family Travel — Sign in</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<main class="login-wrap">
+  <h1>✈️ Family Travel</h1>
+
+  <div class="card">
+    <h2 id="form-title">Sign in</h2>
+    <p id="error" class="error" hidden></p>
+
+    <form id="auth-form">
+      <label for="email">Email</label>
+      <input id="email" type="email" required autocomplete="email" />
+
+      <label for="password">Password</label>
+      <input id="password" type="password" required autocomplete="current-password" minlength="6" />
+
+      <button type="submit" id="submit-btn">Sign in</button>
+    </form>
+
+    <p class="muted" style="margin-top:0.75rem">
+      <a href="#" id="toggle-mode">Need an account? Sign up</a> (must be on the family allowlist)
+    </p>
+
+    <div class="divider">— or —</div>
+
+    <button type="button" id="google-signin" class="secondary" style="width:100%">
+      Sign in with Google
+    </button>
+  </div>
+</main>
+
+<script type="module">
+  import { signInWithEmail, signUpWithEmail, signInWithGoogle, auth } from "./js/auth.js";
+  import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  onAuthStateChanged(auth, (user) => {
+    if (user) window.location.href = "dashboard.html";
+  });
+
+  let mode = "signin";
+  const form = document.getElementById("auth-form");
+  const errorEl = document.getElementById("error");
+  const toggle = document.getElementById("toggle-mode");
+  const formTitle = document.getElementById("form-title");
+  const submitBtn = document.getElementById("submit-btn");
+
+  toggle.addEventListener("click", (e) => {
+    e.preventDefault();
+    mode = mode === "signin" ? "signup" : "signin";
+    formTitle.textContent = mode === "signin" ? "Sign in" : "Create account";
+    submitBtn.textContent = mode === "signin" ? "Sign in" : "Sign up";
+    toggle.textContent = mode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in";
+    errorEl.hidden = true;
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorEl.hidden = true;
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+    submitBtn.disabled = true;
+    try {
+      if (mode === "signin") {
+        await signInWithEmail(email, password);
+      } else {
+        await signUpWithEmail(email, password);
+      }
+      window.location.href = "dashboard.html";
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.hidden = false;
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  document.getElementById("google-signin").addEventListener("click", async () => {
+    errorEl.hidden = true;
+    try {
+      await signInWithGoogle({ requestGmailAndCalendar: false });
+      window.location.href = "dashboard.html";
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.hidden = false;
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Family Travel — Trip</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>✈️ Family Travel</h1>
+  <nav>
+    <a href="dashboard.html">All trips</a>
+    <a href="#" id="signout">Sign out</a>
+  </nav>
+</header>
+
+<main>
+  <div class="card">
+    <h2 id="trip-title">Loading…</h2>
+    <p class="muted" id="trip-meta"></p>
+  </div>
+
+  <div class="card">
+    <h3>Bookings</h3>
+    <p id="sync-error" class="error" hidden></p>
+    <p id="sync-status" class="spinner-text" hidden></p>
+    <button id="sync-btn" class="secondary">Sync from Gmail/Calendar</button>
+    <div id="bookings-list" style="margin-top:1rem">
+      <p class="muted">Loading…</p>
+    </div>
+
+    <details style="margin-top:1rem">
+      <summary>Add booking manually</summary>
+      <form id="booking-form" style="margin-top:0.75rem">
+        <label for="b-type">Type</label>
+        <select id="b-type">
+          <option value="flight">Flight</option>
+          <option value="hotel">Hotel</option>
+          <option value="car">Rental car</option>
+          <option value="activity">Activity</option>
+        </select>
+
+        <label for="b-details">Details</label>
+        <input id="b-details" required placeholder="e.g. Delta DL123 JFK->FCO" />
+
+        <label for="b-confirmation">Confirmation #</label>
+        <input id="b-confirmation" placeholder="optional" />
+
+        <div style="display:flex; gap:1rem">
+          <div style="flex:1">
+            <label for="b-start">Start date</label>
+            <input id="b-start" type="date" />
+          </div>
+          <div style="flex:1">
+            <label for="b-cost">Cost (USD)</label>
+            <input id="b-cost" type="number" step="0.01" placeholder="optional" />
+          </div>
+        </div>
+
+        <button type="submit">Add booking</button>
+      </form>
+    </details>
+  </div>
+
+  <div class="card">
+    <h3>Trip recommendations</h3>
+    <p class="muted">Ask for flight / hotel / activity ideas with rough price ranges, researched live.</p>
+    <form id="rec-form">
+      <label for="r-interests">What are you looking for?</label>
+      <textarea id="r-interests" rows="3" placeholder="e.g. family-friendly hotels near the Colosseum, direct flight options from JFK, kid-friendly activities"></textarea>
+      <button type="submit">Get recommendations</button>
+    </form>
+    <p id="rec-status" class="spinner-text" hidden>Researching…</p>
+    <p id="rec-error" class="error" hidden></p>
+    <div id="rec-results"></div>
+  </div>
+</main>
+
+<script type="module">
+  import { requireAuth, signOut } from "./js/auth.js";
+  import { getTrip, listBookings, addBooking, listRecommendations } from "./js/trips.js";
+  import { syncFromGoogle } from "./js/sync.js";
+  import { getRecommendations } from "./js/recommendations.js";
+
+  const params = new URLSearchParams(location.search);
+  const tripId = params.get("id");
+  if (!tripId) window.location.href = "dashboard.html";
+
+  requireAuth(async () => {
+    await renderTrip();
+    await renderBookings();
+    await renderPastRecommendations();
+  });
+
+  async function renderTrip() {
+    const trip = await getTrip(tripId);
+    document.getElementById("trip-title").textContent = trip.name;
+    document.getElementById("trip-meta").textContent =
+      `${trip.destination} · ${trip.startDate} → ${trip.endDate} · ${trip.status}`;
+  }
+
+  async function renderBookings() {
+    const bookings = await listBookings(tripId);
+    const el = document.getElementById("bookings-list");
+    if (!bookings.length) {
+      el.innerHTML = '<p class="muted">No bookings yet.</p>';
+      return;
+    }
+    el.innerHTML = bookings
+      .map(
+        (b) => `
+        <div class="booking-row">
+          <div>
+            <strong>${escapeHtml(b.type)}</strong> — ${escapeHtml(b.details)}
+            ${b.confirmationNumber ? `<div class="muted">Conf# ${escapeHtml(b.confirmationNumber)}</div>` : ""}
+          </div>
+          <div class="muted">
+            ${b.startDate || ""} ${b.cost ? `· $${b.cost}` : ""}
+            ${b.source === "gmail_sync" ? "· synced" : ""}
+          </div>
+        </div>`
+      )
+      .join("");
+  }
+
+  document.getElementById("booking-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await addBooking(tripId, {
+      type: document.getElementById("b-type").value,
+      details: document.getElementById("b-details").value.trim(),
+      confirmationNumber: document.getElementById("b-confirmation").value.trim(),
+      startDate: document.getElementById("b-start").value,
+      cost: parseFloat(document.getElementById("b-cost").value) || null,
+      source: "manual",
+    });
+    e.target.reset();
+    await renderBookings();
+  });
+
+  document.getElementById("sync-btn").addEventListener("click", async () => {
+    const errorEl = document.getElementById("sync-error");
+    const statusEl = document.getElementById("sync-status");
+    errorEl.hidden = true;
+    statusEl.hidden = false;
+    statusEl.textContent = "Connecting to Google and scanning recent emails/events…";
+    document.getElementById("sync-btn").disabled = true;
+    try {
+      const result = await syncFromGoogle(tripId);
+      statusEl.textContent = `Added ${result.added} booking(s) from sync.`;
+      await renderBookings();
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.hidden = false;
+      statusEl.hidden = true;
+    } finally {
+      document.getElementById("sync-btn").disabled = false;
+    }
+  });
+
+  document.getElementById("rec-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const errorEl = document.getElementById("rec-error");
+    const statusEl = document.getElementById("rec-status");
+    errorEl.hidden = true;
+    statusEl.hidden = false;
+    try {
+      const trip = await getTrip(tripId);
+      const result = await getRecommendations(tripId, {
+        destination: trip.destination,
+        startDate: trip.startDate,
+        endDate: trip.endDate,
+        interests: document.getElementById("r-interests").value.trim(),
+      });
+      renderRecommendation(result.text);
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.hidden = false;
+    } finally {
+      statusEl.hidden = true;
+    }
+  });
+
+  async function renderPastRecommendations() {
+    const recs = await listRecommendations(tripId);
+    recs.forEach((r) => renderRecommendation(r.text, false));
+  }
+
+  function renderRecommendation(text, prepend = true) {
+    const container = document.getElementById("rec-results");
+    const block = document.createElement("div");
+    block.className = "recommendation-block";
+    block.textContent = text;
+    if (prepend) container.prepend(block);
+    else container.appendChild(block);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+
+  document.getElementById("signout").addEventListener("click", async (e) => {
+    e.preventDefault();
+    await signOut();
+    window.location.href = "index.html";
+  });
+</script>
+</body>
+</html>

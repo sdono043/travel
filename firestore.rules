@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isFamilyMember() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/familyMembers/$(request.auth.token.email.lower()));
+    }
+
+    // Managed manually in the console / via the Firebase CLI. No client access.
+    match /familyMembers/{email} {
+      allow read, write: if false;
+    }
+
+    match /trips/{tripId} {
+      allow read, write: if isFamilyMember();
+
+      match /bookings/{bookingId} {
+        allow read, write: if isFamilyMember();
+      }
+
+      match /recommendations/{recId} {
+        allow read, write: if isFamilyMember();
+      }
+    }
+  }
+}

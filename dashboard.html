@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Family Travel — Trips</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>✈️ Family Travel</h1>
+  <nav>
+    <a href="#" id="signout">Sign out</a>
+  </nav>
+</header>
+
+<main>
+  <div class="card">
+    <h2>New trip</h2>
+    <p id="error" class="error" hidden></p>
+    <form id="new-trip-form">
+      <label for="name">Trip name</label>
+      <input id="name" required placeholder="e.g. Summer in Italy" />
+
+      <label for="destination">Destination</label>
+      <input id="destination" required placeholder="e.g. Rome & Florence" />
+
+      <div style="display:flex; gap:1rem">
+        <div style="flex:1">
+          <label for="startDate">Start date</label>
+          <input id="startDate" type="date" required />
+        </div>
+        <div style="flex:1">
+          <label for="endDate">End date</label>
+          <input id="endDate" type="date" required />
+        </div>
+      </div>
+
+      <label for="status">Status</label>
+      <select id="status">
+        <option value="planning">Planning</option>
+        <option value="booked">Booked</option>
+        <option value="upcoming">Upcoming</option>
+        <option value="past">Past</option>
+      </select>
+
+      <button type="submit">Add trip</button>
+    </form>
+  </div>
+
+  <h2>Trips</h2>
+  <div class="trip-list" id="trip-list">
+    <p class="muted">Loading…</p>
+  </div>
+</main>
+
+<script type="module">
+  import { requireAuth, signOut } from "./js/auth.js";
+  import { listTrips, createTrip } from "./js/trips.js";
+
+  const listEl = document.getElementById("trip-list");
+  const errorEl = document.getElementById("error");
+
+  requireAuth(async (user) => {
+    await renderTrips();
+
+    document.getElementById("new-trip-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorEl.hidden = true;
+      try {
+        await createTrip({
+          name: document.getElementById("name").value.trim(),
+          destination: document.getElementById("destination").value.trim(),
+          startDate: document.getElementById("startDate").value,
+          endDate: document.getElementById("endDate").value,
+          status: document.getElementById("status").value,
+          createdBy: user.email,
+        });
+        e.target.reset();
+        await renderTrips();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.hidden = false;
+      }
+    });
+  });
+
+  async function renderTrips() {
+    const trips = await listTrips();
+    if (!trips.length) {
+      listEl.innerHTML = '<p class="muted">No trips yet — add one above.</p>';
+      return;
+    }
+    listEl.innerHTML = trips
+      .map(
+        (t) => `
+        <a class="trip-item" href="trip.html?id=${t.id}">
+          <div>
+            <strong>${escapeHtml(t.name)}</strong>
+            <div class="muted">${escapeHtml(t.destination)} · ${t.startDate} → ${t.endDate}</div>
+          </div>
+          <span class="status-pill">${escapeHtml(t.status)}</span>
+        </a>`
+      )
+      .join("");
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+
+  document.getElementById("signout").addEventListener("click", async (e) => {
+    e.preventDefault();
+    await signOut();
+    window.location.href = "index.html";
+  });
+</script>
+</body>
+</html>
