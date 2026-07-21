@@ -1,4 +1,6 @@
 import { getGoogleAccessToken, functions, signInWithGoogle } from "./auth.js";
+import { geocodeLocation } from "./geocode.js";
+import { updateBookingLocation } from "./trips.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 const GMAIL_QUERY =
@@ -87,5 +89,19 @@ export async function syncFromGoogle(tripId) {
 
   const syncGmailBookings = httpsCallable(functions, "syncGmailBookings");
   const result = await syncGmailBookings({ tripId, items: [...emails, ...events] });
+
+  // Best-effort: geocode each new booking's location so it can show up as a
+  // map pin. Failures here shouldn't block the sync from being reported as
+  // successful.
+  for (const booking of result.data.bookings) {
+    if (!booking.location) continue;
+    try {
+      const geo = await geocodeLocation(booking.location);
+      if (geo) await updateBookingLocation(tripId, booking.id, geo.lat, geo.lng);
+    } catch {
+      // ignore — the booking still saved, just without a map pin
+    }
+  }
+
   return result.data; // { added: number, bookings: [...] }
 }

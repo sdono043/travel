@@ -24,6 +24,10 @@ service cloud.firestore {
       match /recommendations/{recId} {
         allow read, write: if isFamilyMember();
       }
+
+      match /itinerary/{itemId} {
+        allow read, write: if isFamilyMember();
+      }
     }
   }
 }

@@ -142,3 +142,95 @@ label { font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.25
 }
 
 .spinner-text { color: var(--muted); font-style: italic; }
+
+/* Tab bar (Booked Trips / Trip Ideas) */
+.tab-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0.6rem 0.25rem;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+}
+
+.tab-btn:hover { background: none; color: var(--ink); }
+
+.tab-btn.active {
+  color: var(--accent-dark);
+  border-bottom-color: var(--accent);
+}
+
+.status-pill.idea { background: #fdf1e3; color: #8a5a1e; }
+.status-pill.booked { background: #e6efec; color: var(--accent-dark); }
+
+/* Trip header actions */
+.trip-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+/* Map */
+#trip-map {
+  height: 320px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  margin-top: 0.75rem;
+}
+
+/* Day-by-day timeline */
+.day-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.6rem;
+  overflow: hidden;
+}
+
+.day-card summary {
+  cursor: pointer;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  background: #fbfaf8;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+}
+
+.day-card summary::-webkit-details-marker { display: none; }
+
+.day-card-body { padding: 0.25rem 1rem 1rem; }
+
+.day-item-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+.day-item-row:last-child { border-bottom: none; }
+
+.day-item-time { color: var(--muted); width: 4.5rem; flex-shrink: 0; }
+
+.suggestion-card {
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-top: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.suggestion-card button { flex-shrink: 0; }
+
+button.small { padding: 0.3rem 0.7rem; font-size: 0.85rem; }

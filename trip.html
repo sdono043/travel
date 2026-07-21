@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Family Travel — Trip</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -17,8 +18,22 @@
 
 <main>
   <div class="card">
-    <h2 id="trip-title">Loading…</h2>
-    <p class="muted" id="trip-meta"></p>
+    <div class="trip-header-row">
+      <div>
+        <h2 id="trip-title">Loading…</h2>
+        <p class="muted" id="trip-meta"></p>
+      </div>
+      <div>
+        <span class="status-pill" id="trip-status-pill"></span>
+        <button class="secondary small" id="toggle-status-btn" style="margin-left:0.5rem"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Map</h3>
+    <p class="muted">Pins from bookings and itinerary items with a known location.</p>
+    <div id="trip-map"></div>
   </div>
 
   <div class="card">
@@ -44,6 +59,9 @@
         <label for="b-details">Details</label>
         <input id="b-details" required placeholder="e.g. Delta DL123 JFK->FCO" />
 
+        <label for="b-location">Location (optional, for the map)</label>
+        <input id="b-location" placeholder="e.g. Hotel Artemide, Rome" />
+
         <label for="b-confirmation">Confirmation #</label>
         <input id="b-confirmation" placeholder="optional" />
 
@@ -64,6 +82,12 @@
   </div>
 
   <div class="card">
+    <h3>Day-by-day itinerary</h3>
+    <p class="muted">Click a day to see or add its schedule — meals, activities, anything not already a booking.</p>
+    <div id="day-timeline"></div>
+  </div>
+
+  <div class="card">
     <h3>Trip recommendations</h3>
     <p class="muted">Ask for flight / hotel / activity ideas with rough price ranges, researched live.</p>
     <form id="rec-form">
@@ -77,58 +101,93 @@
   </div>
 </main>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
   import { requireAuth, signOut } from "./js/auth.js";
-  import { getTrip, listBookings, addBooking, listRecommendations } from "./js/trips.js";
+  import { getTrip, listBookings, addBooking, listRecommendations, setTripStatus } from "./js/trips.js";
+  import { listItinerary, addItineraryItem, deleteItineraryItem } from "./js/itinerary.js";
+  import { geocodeLocation } from "./js/geocode.js";
   import { syncFromGoogle } from "./js/sync.js";
-  import { getRecommendations } from "./js/recommendations.js";
+  import { getRecommendations, planDay } from "./js/recommendations.js";
 
   const params = new URLSearchParams(location.search);
   const tripId = params.get("id");
   if (!tripId) window.location.href = "dashboard.html";
 
+  let trip = null;
+  let bookings = [];
+  let itinerary = [];
+  const daySuggestions = {}; // date -> [{time,type,title,location,notes,cost}]
+  let map = null;
+  const mapMarkers = [];
+
   requireAuth(async () => {
     await renderTrip();
-    await renderBookings();
+    await Promise.all([renderBookings(), renderTimeline()]);
     await renderPastRecommendations();
   });
 
   async function renderTrip() {
-    const trip = await getTrip(tripId);
+    trip = await getTrip(tripId);
     document.getElementById("trip-title").textContent = trip.name;
-    document.getElementById("trip-meta").textContent =
-      `${trip.destination} · ${trip.startDate} → ${trip.endDate} · ${trip.status}`;
+    document.getElementById("trip-meta").textContent = `${trip.destination} · ${trip.startDate} → ${trip.endDate}`;
+    const pill = document.getElementById("trip-status-pill");
+    pill.textContent = trip.status;
+    pill.className = `status-pill ${trip.status}`;
+    const toggleBtn = document.getElementById("toggle-status-btn");
+    toggleBtn.textContent = trip.status === "idea" ? "Mark as booked" : "Move back to idea";
+    toggleBtn.onclick = async () => {
+      const next = trip.status === "idea" ? "booked" : "idea";
+      await setTripStatus(tripId, next);
+      await renderTrip();
+    };
   }
 
+  // ---------- Bookings ----------
+
   async function renderBookings() {
-    const bookings = await listBookings(tripId);
+    bookings = await listBookings(tripId);
     const el = document.getElementById("bookings-list");
     if (!bookings.length) {
       el.innerHTML = '<p class="muted">No bookings yet.</p>';
-      return;
+    } else {
+      el.innerHTML = bookings
+        .map(
+          (b) => `
+          <div class="booking-row">
+            <div>
+              <strong>${escapeHtml(b.type)}</strong> — ${escapeHtml(b.details)}
+              ${b.confirmationNumber ? `<div class="muted">Conf# ${escapeHtml(b.confirmationNumber)}</div>` : ""}
+            </div>
+            <div class="muted">
+              ${b.startDate || ""} ${b.cost ? `· $${b.cost}` : ""}
+              ${b.source === "gmail_sync" ? "· synced" : ""}
+            </div>
+          </div>`
+        )
+        .join("");
     }
-    el.innerHTML = bookings
-      .map(
-        (b) => `
-        <div class="booking-row">
-          <div>
-            <strong>${escapeHtml(b.type)}</strong> — ${escapeHtml(b.details)}
-            ${b.confirmationNumber ? `<div class="muted">Conf# ${escapeHtml(b.confirmationNumber)}</div>` : ""}
-          </div>
-          <div class="muted">
-            ${b.startDate || ""} ${b.cost ? `· $${b.cost}` : ""}
-            ${b.source === "gmail_sync" ? "· synced" : ""}
-          </div>
-        </div>`
-      )
-      .join("");
+    renderMap();
   }
 
   document.getElementById("booking-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const location = document.getElementById("b-location").value.trim();
+    let lat = null;
+    let lng = null;
+    if (location) {
+      const geo = await geocodeLocation(location);
+      if (geo) {
+        lat = geo.lat;
+        lng = geo.lng;
+      }
+    }
     await addBooking(tripId, {
       type: document.getElementById("b-type").value,
       details: document.getElementById("b-details").value.trim(),
+      location,
+      lat,
+      lng,
       confirmationNumber: document.getElementById("b-confirmation").value.trim(),
       startDate: document.getElementById("b-start").value,
       cost: parseFloat(document.getElementById("b-cost").value) || null,
@@ -148,6 +207,7 @@
     try {
       const result = await syncFromGoogle(tripId);
       statusEl.textContent = `Added ${result.added} booking(s) from sync.`;
+      await renderTrip();
       await renderBookings();
     } catch (err) {
       errorEl.textContent = err.message;
@@ -158,6 +218,207 @@
     }
   });
 
+  // ---------- Map ----------
+
+  function renderMap() {
+    if (!window.L) return;
+    if (!map) {
+      map = L.map("trip-map");
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap contributors",
+        maxZoom: 19,
+      }).addTo(map);
+    }
+    mapMarkers.forEach((m) => map.removeLayer(m));
+    mapMarkers.length = 0;
+
+    const points = [
+      ...bookings.filter((b) => b.lat && b.lng).map((b) => ({ lat: b.lat, lng: b.lng, label: b.details })),
+      ...itinerary.filter((i) => i.lat && i.lng).map((i) => ({ lat: i.lat, lng: i.lng, label: i.title })),
+    ];
+
+    if (!points.length) {
+      map.setView([20, 0], 2);
+      return;
+    }
+    points.forEach((p) => {
+      mapMarkers.push(L.marker([p.lat, p.lng]).addTo(map).bindPopup(escapeHtml(p.label)));
+    });
+    map.fitBounds(points.map((p) => [p.lat, p.lng]), { padding: [30, 30], maxZoom: 14 });
+  }
+
+  // ---------- Day-by-day timeline ----------
+
+  function dateRange(start, end) {
+    const dates = [];
+    let d = new Date(start + "T00:00:00");
+    const last = new Date(end + "T00:00:00");
+    while (d <= last) {
+      dates.push(d.toISOString().slice(0, 10));
+      d.setDate(d.getDate() + 1);
+    }
+    return dates;
+  }
+
+  function formatDay(dateStr) {
+    return new Date(dateStr + "T00:00:00").toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  async function renderTimeline() {
+    itinerary = await listItinerary(tripId);
+    const days = dateRange(trip.startDate, trip.endDate);
+    const container = document.getElementById("day-timeline");
+    container.innerHTML = days
+      .map((date, i) => {
+        const items = itinerary.filter((it) => it.date === date).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+        const dayBookings = bookings.filter((b) => b.startDate === date);
+        return `
+        <details class="day-card" data-date="${date}" ${i === 0 ? "open" : ""}>
+          <summary>${formatDay(date)} <span class="muted">${items.length} item(s)</span></summary>
+          <div class="day-card-body">
+            ${dayBookings
+              .map(
+                (b) =>
+                  `<div class="muted">📌 ${escapeHtml(b.type)}: ${escapeHtml(b.details)}</div>`
+              )
+              .join("")}
+            <div class="day-items">
+              ${
+                items
+                  .map(
+                    (it) => `
+                <div class="day-item-row">
+                  <span class="day-item-time">${escapeHtml(it.time || "")}</span>
+                  <span style="flex:1">
+                    <strong>${escapeHtml(it.type)}</strong> — ${escapeHtml(it.title)}
+                    ${it.location ? `<span class="muted"> · ${escapeHtml(it.location)}</span>` : ""}
+                  </span>
+                  <button class="secondary small delete-item-btn" data-id="${it.id}">Remove</button>
+                </div>`
+                  )
+                  .join("") || '<p class="muted">Nothing scheduled yet.</p>'
+              }
+            </div>
+
+            <form class="day-add-form" data-date="${date}" style="margin-top:0.75rem">
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
+                <input type="time" class="i-time" style="max-width:8rem" />
+                <select class="i-type" style="max-width:9rem">
+                  <option value="activity">Activity</option>
+                  <option value="meal">Meal</option>
+                  <option value="other">Other</option>
+                </select>
+                <input class="i-title" placeholder="Title" required style="flex:1; min-width:10rem" />
+              </div>
+              <input class="i-location" placeholder="Location (optional, for the map)" />
+              <button type="submit" class="small">Add to this day</button>
+            </form>
+
+            <button type="button" class="secondary small plan-day-btn" data-date="${date}" style="margin-top:0.5rem">
+              ✨ Plan this day
+            </button>
+            <div class="day-suggestions" data-date="${date}"></div>
+          </div>
+        </details>`;
+      })
+      .join("");
+  }
+
+  // Event delegation so re-rendering the timeline doesn't need re-binding.
+  const timelineEl = document.getElementById("day-timeline");
+
+  timelineEl.addEventListener("submit", async (e) => {
+    const form = e.target.closest(".day-add-form");
+    if (!form) return;
+    e.preventDefault();
+    const date = form.dataset.date;
+    const location = form.querySelector(".i-location").value.trim();
+    await addItineraryItem(tripId, {
+      date,
+      time: form.querySelector(".i-time").value,
+      type: form.querySelector(".i-type").value,
+      title: form.querySelector(".i-title").value.trim(),
+      location,
+      notes: "",
+      cost: null,
+      source: "manual",
+    });
+    await renderTimeline();
+    renderMap();
+  });
+
+  timelineEl.addEventListener("click", async (e) => {
+    const deleteBtn = e.target.closest(".delete-item-btn");
+    if (deleteBtn) {
+      await deleteItineraryItem(tripId, deleteBtn.dataset.id);
+      await renderTimeline();
+      renderMap();
+      return;
+    }
+
+    const planBtn = e.target.closest(".plan-day-btn");
+    if (planBtn) {
+      const date = planBtn.dataset.date;
+      planBtn.disabled = true;
+      planBtn.textContent = "Thinking…";
+      try {
+        const existingItems = itinerary.filter((it) => it.date === date);
+        const result = await planDay(tripId, {
+          destination: trip.destination,
+          date,
+          existingItems,
+          interests: document.getElementById("r-interests").value.trim(),
+        });
+        daySuggestions[date] = result.suggestions;
+        renderDaySuggestions(date);
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        planBtn.disabled = false;
+        planBtn.textContent = "✨ Plan this day";
+      }
+      return;
+    }
+
+    const addSuggestionBtn = e.target.closest(".add-suggestion-btn");
+    if (addSuggestionBtn) {
+      const date = addSuggestionBtn.dataset.date;
+      const idx = parseInt(addSuggestionBtn.dataset.index, 10);
+      const suggestion = daySuggestions[date][idx];
+      await addItineraryItem(tripId, { ...suggestion, date, source: "ai" });
+      daySuggestions[date].splice(idx, 1);
+      await renderTimeline();
+      renderDaySuggestions(date);
+      renderMap();
+    }
+  });
+
+  function renderDaySuggestions(date) {
+    const el = timelineEl.querySelector(`.day-suggestions[data-date="${date}"]`);
+    if (!el) return;
+    const suggestions = daySuggestions[date] || [];
+    el.innerHTML = suggestions
+      .map(
+        (s, i) => `
+        <div class="suggestion-card">
+          <div>
+            <strong>${escapeHtml(s.time || "")} ${escapeHtml(s.type)}</strong> — ${escapeHtml(s.title)}
+            ${s.location ? `<div class="muted">${escapeHtml(s.location)}</div>` : ""}
+            ${s.notes ? `<div class="muted">${escapeHtml(s.notes)}</div>` : ""}
+            ${s.cost ? `<div class="muted">~$${s.cost}</div>` : ""}
+          </div>
+          <button class="small add-suggestion-btn" data-date="${date}" data-index="${i}">Add</button>
+        </div>`
+      )
+      .join("");
+  }
+
+  // ---------- Trip-level recommendations ----------
+
   document.getElementById("rec-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const errorEl = document.getElementById("rec-error");
@@ -165,7 +426,6 @@
     errorEl.hidden = true;
     statusEl.hidden = false;
     try {
-      const trip = await getTrip(tripId);
       const result = await getRecommendations(tripId, {
         destination: trip.destination,
         startDate: trip.startDate,

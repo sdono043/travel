@@ -38,17 +38,18 @@
 
       <label for="status">Status</label>
       <select id="status">
-        <option value="planning">Planning</option>
-        <option value="booked">Booked</option>
-        <option value="upcoming">Upcoming</option>
-        <option value="past">Past</option>
+        <option value="idea">Idea — still deciding</option>
+        <option value="booked">Booked — it's happening</option>
       </select>
 
       <button type="submit">Add trip</button>
     </form>
   </div>
 
-  <h2>Trips</h2>
+  <div class="tab-bar">
+    <button type="button" class="tab-btn active" data-tab="booked">Booked Trips</button>
+    <button type="button" class="tab-btn" data-tab="idea">Trip Ideas</button>
+  </div>
   <div class="trip-list" id="trip-list">
     <p class="muted">Loading…</p>
   </div>
@@ -60,9 +61,11 @@
 
   const listEl = document.getElementById("trip-list");
   const errorEl = document.getElementById("error");
+  let allTrips = [];
+  let activeTab = "booked";
 
   requireAuth(async (user) => {
-    await renderTrips();
+    await refreshTrips();
 
     document.getElementById("new-trip-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -77,7 +80,7 @@
           createdBy: user.email,
         });
         e.target.reset();
-        await renderTrips();
+        await refreshTrips();
       } catch (err) {
         errorEl.textContent = err.message;
         errorEl.hidden = false;
@@ -85,10 +88,23 @@
     });
   });
 
-  async function renderTrips() {
-    const trips = await listTrips();
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      activeTab = btn.dataset.tab;
+      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b === btn));
+      renderTrips();
+    });
+  });
+
+  async function refreshTrips() {
+    allTrips = await listTrips();
+    renderTrips();
+  }
+
+  function renderTrips() {
+    const trips = allTrips.filter((t) => (t.status || "idea") === activeTab);
     if (!trips.length) {
-      listEl.innerHTML = '<p class="muted">No trips yet — add one above.</p>';
+      listEl.innerHTML = `<p class="muted">No ${activeTab === "booked" ? "booked trips" : "trip ideas"} yet.</p>`;
       return;
     }
     listEl.innerHTML = trips
@@ -99,7 +115,7 @@
             <strong>${escapeHtml(t.name)}</strong>
             <div class="muted">${escapeHtml(t.destination)} · ${t.startDate} → ${t.endDate}</div>
           </div>
-          <span class="status-pill">${escapeHtml(t.status)}</span>
+          <span class="status-pill ${t.status}">${escapeHtml(t.status)}</span>
         </a>`
       )
       .join("");

@@ -6,11 +6,15 @@ import {
   getDoc,
   getDocs,
   deleteDoc,
+  updateDoc,
   query,
   orderBy,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+// status is one of "idea" | "booked". A trip is auto-promoted from idea to
+// booked by the sync Cloud Function as soon as a real flight/hotel
+// confirmation is found for it.
 export async function listTrips() {
   const q = query(collection(db, "trips"), orderBy("startDate", "asc"));
   const snap = await getDocs(q);
@@ -29,7 +33,7 @@ export async function createTrip({ name, destination, startDate, endDate, status
     destination,
     startDate,
     endDate,
-    status: status || "planning",
+    status: status || "idea",
     createdBy,
     createdAt: serverTimestamp(),
   });
@@ -38,6 +42,10 @@ export async function createTrip({ name, destination, startDate, endDate, status
 
 export async function deleteTrip(tripId) {
   await deleteDoc(doc(db, "trips", tripId));
+}
+
+export async function setTripStatus(tripId, status) {
+  await updateDoc(doc(db, "trips", tripId), { status });
 }
 
 export async function listBookings(tripId) {
@@ -56,6 +64,10 @@ export async function addBooking(tripId, booking) {
 
 export async function deleteBooking(tripId, bookingId) {
   await deleteDoc(doc(db, "trips", tripId, "bookings", bookingId));
+}
+
+export async function updateBookingLocation(tripId, bookingId, lat, lng) {
+  await updateDoc(doc(db, "trips", tripId, "bookings", bookingId), { lat, lng });
 }
 
 export async function listRecommendations(tripId) {
