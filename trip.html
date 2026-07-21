@@ -136,7 +136,8 @@
 <script src="https://unpkg.com/marked@12/marked.min.js"></script>
 <script type="module">
   import { requireAuth, signOut } from "./js/auth.js";
-  import { getTrip, listBookings, addBooking, deleteBooking, listRecommendations, setTripStatus, updateBookingLocation } from "./js/trips.js";
+  import { getTrip, listBookings, addBooking, deleteBooking, listRecommendations, setTripStatus, updateBookingLocation, updateTripLocation } from "./js/trips.js";
+  import { getDailyForecast, weatherIcon } from "./js/weather.js";
   import { listItinerary, addItineraryItem, deleteItineraryItem } from "./js/itinerary.js";
   import { geocodeLocation } from "./js/geocode.js";
   import { getDrivingDuration, guessDepartureAirportQuery } from "./js/drivetime.js";
@@ -159,6 +160,7 @@
 
   requireAuth(async () => {
     await renderTrip();
+    await loadForecast();
     await Promise.all([renderBookings(), renderTimeline()]);
     await renderPastRecommendations();
   });
@@ -177,6 +179,25 @@
       await setTripStatus(tripId, next);
       await renderTrip();
     };
+  }
+
+  // date -> { code, high, low }. Populated once per page load; the trip's
+  // destination is geocoded once and cached on the trip doc (lat/lng) so
+  // repeat visits don't re-geocode. Open-Meteo only has data for roughly the
+  // next 16 days, so days further out just won't have an entry here.
+  let forecastByDate = {};
+
+  async function loadForecast() {
+    if ((!trip.lat || !trip.lng) && trip.destination) {
+      const geo = await geocodeLocation(trip.destination);
+      if (geo) {
+        trip.lat = geo.lat;
+        trip.lng = geo.lng;
+        await updateTripLocation(tripId, geo);
+      }
+    }
+    if (!trip.lat || !trip.lng) return;
+    forecastByDate = await getDailyForecast(trip.lat, trip.lng, trip.startDate, trip.endDate);
   }
 
   // ---------- Bookings ----------
@@ -697,9 +718,11 @@
         // Spans the whole stay for hotels/cars with an end date, not just the check-in day.
         const dayBookings = bookings.filter((b) => date >= b.startDate && date <= (b.endDate || b.startDate));
         const driveTime = checkoutDriveTimes[date];
+        const fc = forecastByDate[date];
+        const weatherLabel = fc ? `${weatherIcon(fc.code)} ${fc.high}°/${fc.low}°` : "";
         return `
         <details class="day-card" data-date="${date}" ${i === 0 ? "open" : ""}>
-          <summary>${formatDay(date)} <span class="muted">${items.length} item(s)</span></summary>
+          <summary>${formatDay(date)} <span class="muted">${weatherLabel ? `${weatherLabel} · ` : ""}${items.length} item(s)</span></summary>
           <div class="day-card-body">
             ${dayBookings
               .map((b) => `<div class="muted">${dayBookingLine(b, date)}</div>`)

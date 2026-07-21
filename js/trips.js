@@ -48,6 +48,13 @@ export async function setTripStatus(tripId, status) {
   await updateDoc(doc(db, "trips", tripId), { status });
 }
 
+// Geocoded once per trip and cached on the trip doc so the weather forecast
+// (and anything else keyed off the destination) doesn't re-geocode on every
+// page load.
+export async function updateTripLocation(tripId, { lat, lng }) {
+  await updateDoc(doc(db, "trips", tripId), { lat, lng });
+}
+
 export async function listBookings(tripId) {
   const q = query(collection(db, "trips", tripId, "bookings"), orderBy("startDate", "asc"));
   const snap = await getDocs(q);
