@@ -9,9 +9,15 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/familyMembers/$(request.auth.token.email.lower()));
     }
 
-    // Managed manually in the console / via the Firebase CLI. No client access.
+    // Membership docs are managed manually in the console / via the Firebase
+    // CLI — clients can never list or write this collection. A signed-in
+    // user may only read their OWN doc, to check their own allowlist status
+    // during sign-in/sign-up (see isAllowedFamilyMember in js/auth.js).
     match /familyMembers/{email} {
-      allow read, write: if false;
+      allow get: if request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == email;
+      allow list, write: if false;
     }
 
     match /trips/{tripId} {
