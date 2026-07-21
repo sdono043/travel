@@ -1,18 +1,28 @@
-import { functions } from "./auth.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+import { getIdToken } from "./auth.js";
+import { API_BASE_URL } from "./firebase-config.js";
+
+async function callApi(path, body) {
+  const idToken = await getIdToken();
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
 
 // Called from trip.html "Get recommendations" panel (destination-level research).
 export async function getRecommendations(tripId, { destination, startDate, endDate, interests }) {
-  const getTripRecommendations = httpsCallable(functions, "getTripRecommendations");
-  const result = await getTripRecommendations({ tripId, destination, startDate, endDate, interests });
-  return result.data; // { text: string }
+  return callApi("/api/getTripRecommendations", { tripId, destination, startDate, endDate, interests });
+  // { text: string }
 }
 
 // Called from a day drill-in's "Plan this day" button. Returns structured
 // suggestions the UI can add to the itinerary individually, rather than
 // free-form text.
 export async function planDay(tripId, { destination, date, existingItems, interests }) {
-  const planDayFn = httpsCallable(functions, "planDay");
-  const result = await planDayFn({ tripId, destination, date, existingItems, interests });
-  return result.data; // { suggestions: [{ time, type, title, location, notes, cost }] }
+  return callApi("/api/planDay", { tripId, destination, date, existingItems, interests });
+  // { suggestions: [{ time, type, title, location, notes, cost }] }
 }

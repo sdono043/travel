@@ -13,13 +13,11 @@ import {
   doc,
   getDoc,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getFunctions } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
-import { firebaseConfig, FUNCTIONS_REGION } from "./firebase-config.js";
+import { firebaseConfig } from "./firebase-config.js";
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const functions = getFunctions(app, FUNCTIONS_REGION);
 
 // Google OAuth scopes needed to read booking confirmations. Only the connected
 // owner account needs these; other family members can just sign in normally.
@@ -80,6 +78,12 @@ export function signOut() {
 
 export function getGoogleAccessToken() {
   return sessionStorage.getItem("googleAccessToken");
+}
+
+// Firebase ID token for authenticating requests to the Vercel API functions.
+export async function getIdToken() {
+  if (!auth.currentUser) throw new Error("Not signed in.");
+  return auth.currentUser.getIdToken();
 }
 
 // Call on dashboard.html / trip.html to redirect unauthenticated visitors back to login.

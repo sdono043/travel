@@ -1,0 +1,11 @@
+{
+  "name": "travel-api",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "firebase-admin": "^12.6.0"
+  }
+}

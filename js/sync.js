@@ -1,7 +1,7 @@
-import { getGoogleAccessToken, functions, signInWithGoogle } from "./auth.js";
+import { getGoogleAccessToken, signInWithGoogle, getIdToken } from "./auth.js";
 import { geocodeLocation } from "./geocode.js";
 import { updateBookingLocation } from "./trips.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+import { API_BASE_URL } from "./firebase-config.js";
 
 const GMAIL_QUERY =
   'category:primary newer_than:180d (subject:(confirmation OR itinerary OR "booking confirmed" OR reservation) (flight OR hotel OR "rental car" OR itinerary OR trip))';
@@ -87,13 +87,19 @@ export async function syncFromGoogle(tripId) {
     fetchUpcomingCalendarEvents(token),
   ]);
 
-  const syncGmailBookings = httpsCallable(functions, "syncGmailBookings");
-  const result = await syncGmailBookings({ tripId, items: [...emails, ...events] });
+  const idToken = await getIdToken();
+  const res = await fetch(`${API_BASE_URL}/api/syncGmailBookings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ tripId, items: [...emails, ...events] }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `Sync failed (${res.status})`);
 
   // Best-effort: geocode each new booking's location so it can show up as a
   // map pin. Failures here shouldn't block the sync from being reported as
   // successful.
-  for (const booking of result.data.bookings) {
+  for (const booking of data.bookings) {
     if (!booking.location) continue;
     try {
       const geo = await geocodeLocation(booking.location);
@@ -103,5 +109,5 @@ export async function syncFromGoogle(tripId) {
     }
   }
 
-  return result.data; // { added: number, bookings: [...] }
+  return data; // { added: number, bookings: [...] }
 }
