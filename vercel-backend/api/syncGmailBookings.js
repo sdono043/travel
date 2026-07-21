@@ -33,6 +33,13 @@ const BOOKING_SCHEMA = {
               "no end date is present in the source text. Look for labels like 'Arrival - Departure', 'Check-in / " +
               "Check-out', 'Nights', or similar date ranges in hotel and car confirmations.",
           },
+          startTime: {
+            type: "string",
+            description:
+              "Local time of day ONLY (no date), e.g. '3:45 PM' or '15:45' — empty string if no time is present " +
+              "in the source text. For flights, the departure time. For hotels, the check-in time if stated (often " +
+              "'3:00 PM' or 'after 3 PM'). For rental cars, the pickup time.",
+          },
           cost: { type: "number" },
           location: {
             type: "string",
@@ -47,7 +54,17 @@ const BOOKING_SCHEMA = {
               "it looks like a different trip (e.g. unrelated dates or a different city).",
           },
         },
-        required: ["type", "details", "confirmationNumber", "startDate", "endDate", "cost", "location", "likelyMatch"],
+        required: [
+          "type",
+          "details",
+          "confirmationNumber",
+          "startDate",
+          "endDate",
+          "startTime",
+          "cost",
+          "location",
+          "likelyMatch",
+        ],
         additionalProperties: false,
       },
     },
@@ -62,7 +79,8 @@ const BOOKING_SCHEMA = {
 // (falling back to type+date+a normalized details string), keeping whichever
 // duplicate has the most fields filled in.
 function dedupeBookings(bookings) {
-  const completeness = (b) => [b.location, b.cost, b.confirmationNumber, b.startDate].filter(Boolean).length;
+  const completeness = (b) =>
+    [b.location, b.cost, b.confirmationNumber, b.startDate, b.startTime].filter(Boolean).length;
   const byKey = new Map();
   for (const b of bookings) {
     b.startDate = (b.startDate || "").slice(0, 10);
@@ -120,7 +138,8 @@ module.exports = async (req, res) => {
             "and location is a separate field from details — never merge an address into details). For hotels " +
             "and rental cars, look carefully for a check-in/check-out or pickup/return date range (often in a " +
             "table like 'Arrival - Departure') and fill in BOTH startDate and endDate — do not leave endDate " +
-            "empty just because it takes more effort to find.\n\n" +
+            "empty just because it takes more effort to find. Also look for a time of day (departure time, " +
+            "check-in time, pickup time) and fill in startTime when the source text states one.\n\n" +
             `The trip currently being planned is: destination "${destination || "unknown"}", dates ${startDate || "?"} ` +
             `to ${endDate || "?"}. For each booking you find, set likelyMatch to true only if its dates/destination ` +
             "plausibly belong to this specific trip — set it to false for anything that looks like a different trip " +

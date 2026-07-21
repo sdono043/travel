@@ -83,6 +83,10 @@
             <input id="b-end" type="date" />
           </div>
           <div style="flex:1">
+            <label for="b-time">Time (optional)</label>
+            <input id="b-time" placeholder="e.g. 3:45 PM" />
+          </div>
+          <div style="flex:1">
             <label for="b-cost">Cost (USD)</label>
             <input id="b-cost" type="number" step="0.01" placeholder="optional" />
           </div>
@@ -193,6 +197,7 @@
             <span class="booking-line">
               <span class="muted">
                 ${formatBookingDate(b.startDate)}${b.endDate && b.endDate !== b.startDate ? ` → ${formatBookingDate(b.endDate)}` : ""}
+                ${b.startTime ? ` · ${escapeHtml(b.startTime)}` : ""}
                 ${b.cost ? ` · $${b.cost}` : ""}
               </span>
               <button class="secondary small delete-booking-btn" data-id="${b.id}" title="Remove">✕</button>
@@ -238,6 +243,7 @@
       confirmationNumber: document.getElementById("b-confirmation").value.trim(),
       startDate: document.getElementById("b-start").value,
       endDate: document.getElementById("b-end").value,
+      startTime: document.getElementById("b-time").value.trim(),
       cost: parseFloat(document.getElementById("b-cost").value) || null,
       source: "manual",
     });
@@ -318,6 +324,7 @@
           </span>
           <span class="muted">
             ${formatBookingDate(c.startDate)}${c.endDate && c.endDate !== c.startDate ? ` → ${formatBookingDate(c.endDate)}` : ""}
+            ${c.startTime ? ` · ${escapeHtml(c.startTime)}` : ""}
             ${c.cost ? `· $${c.cost}` : ""}
           </span>
         </label>`
@@ -350,6 +357,7 @@
           confirmationNumber: candidate.confirmationNumber,
           startDate: candidate.startDate,
           endDate: candidate.endDate || "",
+          startTime: candidate.startTime || "",
           cost: candidate.cost || null,
           location: candidate.location,
           lat,
@@ -457,7 +465,7 @@
         : formatBookingDate(b.startDate);
     return `
       <strong>${TYPE_ICON[b.type] || ""} ${escapeHtml(b.details)}</strong><br>
-      <span class="muted">${dateLine}${b.cost ? ` · $${b.cost}` : ""}</span>
+      <span class="muted">${dateLine}${b.startTime ? ` · ${escapeHtml(b.startTime)}` : ""}${b.cost ? ` · $${b.cost}` : ""}</span>
       ${b.confirmationNumber ? `<br><span class="muted">#${escapeHtml(b.confirmationNumber)}</span>` : ""}
       ${b.location ? `<br><span class="muted">${escapeHtml(b.location)}</span>` : ""}
     `;
