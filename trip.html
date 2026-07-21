@@ -112,7 +112,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
   import { requireAuth, signOut } from "./js/auth.js";
-  import { getTrip, listBookings, addBooking, listRecommendations, setTripStatus } from "./js/trips.js";
+  import { getTrip, listBookings, addBooking, deleteBooking, listRecommendations, setTripStatus } from "./js/trips.js";
   import { listItinerary, addItineraryItem, deleteItineraryItem } from "./js/itinerary.js";
   import { geocodeLocation } from "./js/geocode.js";
   import { syncFromGoogle } from "./js/sync.js";
@@ -121,6 +121,8 @@
   const params = new URLSearchParams(location.search);
   const tripId = params.get("id");
   if (!tripId) window.location.href = "dashboard.html";
+
+  const TYPE_ICON = { flight: "✈️", hotel: "🏨", car: "🚗", activity: "🎟️" };
 
   let trip = null;
   let bookings = [];
@@ -154,6 +156,13 @@
 
   // ---------- Bookings ----------
 
+  function formatBookingDate(dateStr) {
+    if (!dateStr) return "";
+    const d = new Date(dateStr.slice(0, 10) + "T00:00:00");
+    if (isNaN(d)) return dateStr;
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
   async function renderBookings() {
     bookings = await listBookings(tripId);
     const el = document.getElementById("bookings-list");
@@ -163,21 +172,30 @@
       el.innerHTML = bookings
         .map(
           (b) => `
-          <div class="booking-row">
-            <div>
-              <strong>${escapeHtml(b.type)}</strong> — ${escapeHtml(b.details)}
-              ${b.confirmationNumber ? `<div class="muted">Conf# ${escapeHtml(b.confirmationNumber)}</div>` : ""}
-            </div>
-            <div class="muted">
-              ${b.startDate || ""} ${b.cost ? `· $${b.cost}` : ""}
-              ${b.source === "gmail_sync" ? "· synced" : ""}
-            </div>
+          <div class="booking-row-compact">
+            <span class="booking-line">
+              <span title="${escapeHtml(b.type)}">${TYPE_ICON[b.type] || "📌"}</span>
+              <strong>${escapeHtml(b.details)}</strong>
+              ${b.confirmationNumber ? `<span class="muted">#${escapeHtml(b.confirmationNumber)}</span>` : ""}
+            </span>
+            <span class="booking-line">
+              <span class="muted">${formatBookingDate(b.startDate)}${b.cost ? ` · $${b.cost}` : ""}</span>
+              <button class="secondary small delete-booking-btn" data-id="${b.id}" title="Remove">✕</button>
+            </span>
           </div>`
         )
         .join("");
     }
     renderMap();
   }
+
+  document.getElementById("bookings-list").addEventListener("click", async (e) => {
+    const btn = e.target.closest(".delete-booking-btn");
+    if (!btn) return;
+    await deleteBooking(tripId, btn.dataset.id);
+    await renderBookings();
+    await renderTimeline();
+  });
 
   document.getElementById("booking-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -223,11 +241,17 @@
         startDate: trip.startDate,
         endDate: trip.endDate,
       });
-      syncCandidates = result.candidates;
+      const before = result.candidates.length;
+      syncCandidates = result.candidates.filter((c) => !alreadyBooked(c));
+      const skipped = before - syncCandidates.length;
       if (!syncCandidates.length) {
-        statusEl.textContent = "No travel bookings found in recent email/calendar.";
+        statusEl.textContent = skipped
+          ? `No new bookings found (${skipped} already added).`
+          : "No travel bookings found in recent email/calendar.";
       } else {
-        statusEl.textContent = `Found ${syncCandidates.length} possible booking(s) — review below.`;
+        statusEl.textContent =
+          `Found ${syncCandidates.length} possible booking(s) — review below.` +
+          (skipped ? ` (${skipped} already added, hidden.)` : "");
         renderSyncCandidates();
       }
     } catch (err) {
@@ -238,6 +262,22 @@
       document.getElementById("sync-btn").disabled = false;
     }
   });
+
+  // A candidate is a near-duplicate of something already saved for this trip
+  // if it shares a non-empty confirmation number, or otherwise matches on
+  // type + date + details text.
+  function alreadyBooked(candidate) {
+    return bookings.some((b) => {
+      if (candidate.confirmationNumber && b.confirmationNumber) {
+        return b.confirmationNumber.toLowerCase() === candidate.confirmationNumber.toLowerCase();
+      }
+      return (
+        b.type === candidate.type &&
+        b.startDate === candidate.startDate &&
+        b.details.toLowerCase().trim() === candidate.details.toLowerCase().trim()
+      );
+    });
+  }
 
   function renderSyncCandidates() {
     const container = document.getElementById("sync-candidates");
@@ -253,11 +293,12 @@
         <label class="booking-row" style="cursor:pointer; align-items:flex-start; gap:0.75rem">
           <input type="checkbox" class="sync-candidate-check" data-index="${i}" ${c.likelyMatch ? "checked" : ""} style="width:auto; margin-top:0.2rem" />
           <span style="flex:1">
-            <strong>${escapeHtml(c.type)}</strong> — ${escapeHtml(c.details)}
+            <span>${TYPE_ICON[c.type] || "📌"}</span>
+            <strong>${escapeHtml(c.details)}</strong>
             ${c.confirmationNumber ? `<div class="muted">Conf# ${escapeHtml(c.confirmationNumber)}</div>` : ""}
             ${!c.likelyMatch ? '<div class="muted">May not match this trip\'s dates/destination</div>' : ""}
           </span>
-          <span class="muted">${c.startDate || ""} ${c.cost ? `· $${c.cost}` : ""}</span>
+          <span class="muted">${formatBookingDate(c.startDate)} ${c.cost ? `· $${c.cost}` : ""}</span>
         </label>`
       )
       .join("");
@@ -384,10 +425,7 @@
           <summary>${formatDay(date)} <span class="muted">${items.length} item(s)</span></summary>
           <div class="day-card-body">
             ${dayBookings
-              .map(
-                (b) =>
-                  `<div class="muted">📌 ${escapeHtml(b.type)}: ${escapeHtml(b.details)}</div>`
-              )
+              .map((b) => `<div class="muted">${TYPE_ICON[b.type] || "📌"} ${escapeHtml(b.details)}</div>`)
               .join("")}
             <div class="day-items">
               ${
