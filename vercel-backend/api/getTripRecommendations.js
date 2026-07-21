@@ -60,10 +60,12 @@ module.exports = async (req, res) => {
       ],
     });
 
-    const text = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("\n");
+    // With web_search enabled, Claude interleaves short narration text blocks
+    // between tool calls ("Let me search for X", "the result is JSON, let me
+    // parse it"...) — only the LAST text block is the actual finished
+    // answer; joining all of them leaked that scratch narration to the user.
+    const textBlocks = response.content.filter((b) => b.type === "text");
+    const text = textBlocks.length ? textBlocks[textBlocks.length - 1].text : "";
 
     const ref = await db.collection("trips").doc(tripId).collection("recommendations").add({
       destination,

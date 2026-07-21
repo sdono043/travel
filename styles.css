@@ -283,7 +283,7 @@ button.small { padding: 0.3rem 0.7rem; font-size: 0.85rem; }
 /* Horizontal trip timeline */
 .timeline-wrap {
   position: relative;
-  padding-top: 1.75rem;
+  padding-top: 2.5rem;
   padding-bottom: 0.5rem;
   overflow-x: auto;
 }
@@ -299,11 +299,27 @@ button.small { padding: 0.3rem 0.7rem; font-size: 0.85rem; }
 
 .timeline-day-tick {
   position: absolute;
-  top: -1.4rem;
+  top: -2.15rem;
   transform: translateX(-50%);
   font-size: 0.68rem;
   color: var(--muted);
   white-space: nowrap;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.timeline-day-tick div:first-child {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.timeline-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
 }
 
 .timeline-bar {

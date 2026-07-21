@@ -133,6 +133,7 @@
   import { getTrip, listBookings, addBooking, deleteBooking, listRecommendations, setTripStatus, updateBookingLocation } from "./js/trips.js";
   import { listItinerary, addItineraryItem, deleteItineraryItem } from "./js/itinerary.js";
   import { geocodeLocation } from "./js/geocode.js";
+  import { getDrivingDuration, guessDepartureAirportQuery } from "./js/drivetime.js";
   import { syncFromGoogle } from "./js/sync.js";
   import { getRecommendations, planDay } from "./js/recommendations.js";
 
@@ -505,10 +506,19 @@
 
     let html = days
       .map((d, i) => {
-        const label = new Date(d + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
-        return `<div class="timeline-day-tick" style="left:${(i + 0.5) * dayWidth}%">${label}</div>`;
+        const dateObj = new Date(d + "T00:00:00");
+        const weekday = dateObj.toLocaleDateString(undefined, { weekday: "short" });
+        const monthDay = dateObj.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        return `<div class="timeline-day-tick" style="left:${(i + 0.5) * dayWidth}%"><div>${weekday}</div><div>${monthDay}</div></div>`;
       })
       .join("");
+
+    // Light vertical gridlines between days (not at the two outer edges,
+    // which already have the track's own border) so bars are easy to read
+    // against without the grid becoming the visual focus.
+    for (let i = 1; i < totalDays; i++) {
+      html += `<div class="timeline-gridline" style="left:${i * dayWidth}%"></div>`;
+    }
 
     const icons = [];
     const spans = [];
@@ -599,15 +609,60 @@
     });
   }
 
+  // hotel booking id -> drive-time result, cached once successfully computed
+  // so re-rendering the itinerary doesn't re-hit the routing API every time.
+  // A failed/empty lookup is deliberately NOT cached, since it's often
+  // transient (e.g. the return flight hasn't been added yet) and should be
+  // retried on the next render rather than staying stuck forever.
+  const driveTimeCache = new Map();
+
+  // On a hotel's checkout day, estimate the drive to the airport for
+  // whichever flight departs next after checkout (usually the flight home).
+  // Best-effort: if the flight's departure city can't be parsed or geocoded,
+  // or the routing lookup fails, that checkout day is just skipped.
+  async function computeCheckoutDriveTimes() {
+    const result = {};
+    const hotels = bookings.filter((b) => b.type === "hotel" && b.endDate && b.lat && b.lng);
+    for (const hotel of hotels) {
+      if (driveTimeCache.has(hotel.id)) {
+        const cached = driveTimeCache.get(hotel.id);
+        if (cached) result[hotel.endDate] = cached;
+        continue;
+      }
+      const nextFlight = bookings
+        .filter((b) => b.type === "flight" && b.startDate >= hotel.endDate)
+        .sort((a, b) => a.startDate.localeCompare(b.startDate))[0];
+      const query = nextFlight
+        ? guessDepartureAirportQuery(nextFlight.details, trip.destination)
+        : null;
+      const airportGeo = query ? await geocodeLocation(query) : null;
+      const route = airportGeo ? await getDrivingDuration(hotel.lat, hotel.lng, airportGeo.lat, airportGeo.lng) : null;
+      const computed = route
+        ? {
+            minutes: Math.round(route.durationSeconds / 60),
+            miles: Math.round(route.distanceMeters / 1609.34),
+            label: query.replace(/ airport$/i, ""),
+          }
+        : null;
+      if (computed) {
+        driveTimeCache.set(hotel.id, computed);
+        result[hotel.endDate] = computed;
+      }
+    }
+    return result;
+  }
+
   async function renderTimeline() {
     itinerary = await listItinerary(tripId);
     const days = dateRange(trip.startDate, trip.endDate);
+    const checkoutDriveTimes = await computeCheckoutDriveTimes();
     const container = document.getElementById("day-timeline");
     container.innerHTML = days
       .map((date, i) => {
         const items = itinerary.filter((it) => it.date === date).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
         // Spans the whole stay for hotels/cars with an end date, not just the check-in day.
         const dayBookings = bookings.filter((b) => date >= b.startDate && date <= (b.endDate || b.startDate));
+        const driveTime = checkoutDriveTimes[date];
         return `
         <details class="day-card" data-date="${date}" ${i === 0 ? "open" : ""}>
           <summary>${formatDay(date)} <span class="muted">${items.length} item(s)</span></summary>
@@ -615,6 +670,7 @@
             ${dayBookings
               .map((b) => `<div class="muted">${TYPE_ICON[b.type] || "📌"} ${escapeHtml(b.details)}</div>`)
               .join("")}
+            ${driveTime ? `<div class="muted">🚗 ~${driveTime.minutes} min drive to ${escapeHtml(driveTime.label)} airport (${driveTime.miles} mi)</div>` : ""}
             <div class="day-items">
               ${
                 items
