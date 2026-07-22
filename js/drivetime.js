@@ -36,16 +36,28 @@ function lastCityToken(text) {
   return lastRun.length ? lastRun.join(" ") : null;
 }
 
-// Guess a geocode-able "<city> airport" search string for the DEPARTURE side
-// of a flight, from its free-text `details` field. Handles both the clean
-// "Airline FLT123 CityA -> CityB" format and the older "... departing CityA
-// (CODE) arriving CityB (CODE)" phrasing. Falls back to the trip's
-// destination when details doesn't parse cleanly.
+// Guess a geocode-able search string for the DEPARTURE side of a flight, from
+// its free-text `details` field. Handles both the clean "Airline FLT123
+// CityA -> CityB" format and the older "... departing CityA (CODE) arriving
+// CityB (CODE)" phrasing. Falls back to the trip's destination when details
+// doesn't parse cleanly.
 export function guessDepartureAirportQuery(details, fallbackDestination) {
   if (details) {
     const arrowSplit = details.split(/\s*(?:->|-->|→)\s*/);
-    if (arrowSplit.length >= 2) {
-      const city = lastCityToken(arrowSplit[0]);
+    const beforeArrow = arrowSplit.length >= 2 ? arrowSplit[0].trim() : null;
+
+    // An explicit 3-letter IATA code (e.g. "(PIE)") is far more reliable than
+    // reconstructing a city name from free text — a hyphenated/multi-word
+    // city name (e.g. "St Petersburg-Clearwater") breaks the city-name
+    // heuristic below and can geocode to a random same-named place anywhere
+    // in the world. Prefer the code whenever one is present.
+    const departingCodeMatch = details.match(/departing\s+.*?\(([A-Z]{3})\)/i);
+    const arrowCodeMatch = beforeArrow ? beforeArrow.match(/\(([A-Z]{3})\)$/) : null;
+    const code = departingCodeMatch?.[1] || arrowCodeMatch?.[1];
+    if (code) return `${code} airport`;
+
+    if (beforeArrow) {
+      const city = lastCityToken(beforeArrow);
       if (city) return `${city} airport`;
     }
     const departingMatch = details.match(/departing\s+([A-Za-z][A-Za-z .]*?)(?:\s*\(|\s+arriving|,|$)/i);
